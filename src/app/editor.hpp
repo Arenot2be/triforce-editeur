@@ -161,7 +161,7 @@ public:
     // -- modèles, textures, terrain
     std::map<std::string, ModelSlot> modelSlots;
     std::map<std::string, TexSlot> texSlots;
-    Jobs jobs{std::max(2u, std::min(8u, std::thread::hardware_concurrency()))};
+    Jobs jobs{int(std::max(2u, std::min(8u, std::thread::hardware_concurrency())))};
     ModelSlot* model(const std::string& actor);
     TexSlot* texture(const std::string& name);
     std::vector<std::string> scenes;
