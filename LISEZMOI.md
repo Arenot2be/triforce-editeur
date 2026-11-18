@@ -49,7 +49,7 @@ Le compteur « illisibles » ouvre la liste des textures qui n'ont pas pu être 
 ## Compiler soi-même
 
 ```
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -A x64
 cmake --build build --config Release --target TriforceEditeur
 ```
 
