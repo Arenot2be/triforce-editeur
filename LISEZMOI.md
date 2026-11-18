@@ -46,6 +46,14 @@ sont chargés en arrière-plan. Les objets sans modèle sont des boîtes de la c
 la zone est choisi d'après le nom de la carte ; la liste « Terrain » permet d'en prendre un autre ou aucun.
 Le compteur « illisibles » ouvre la liste des textures qui n'ont pas pu être affichées, avec la raison.
 
+Les modèles `.bfres.mc` (format « MeshCodec » : BFRES compressé, tampons de sommets et d'index encodés) sont
+décodés avec le code de [dt-12345/MeshCodec](https://github.com/dt-12345/MeshCodec).
+
+Restent des boîtes les modèles dont la géométrie est en **meshlets** (environ 12 %, surtout falaises, rochers et
+salles) : le jeu les décode sur la carte graphique, dans ses mesh shaders, dans un format qui n'est pas documenté.
+Le panneau de sélection l'indique et propose « Exporter ce modèle pour analyse », qui écrit le modèle décompressé
+dans `Documents\Triforce-modkit\analyse` (pour ton usage : ne le partage pas publiquement).
+
 ## Compiler soi-même
 
 ```
@@ -53,7 +61,7 @@ cmake -S . -B build -A x64
 cmake --build build --config Release --target TriforceEditeur
 ```
 
-Les dépendances (GLFW, Dear ImGui, volk, Vulkan-Headers, zstd) sont téléchargées par CMake. Les shaders sont déjà
+Les dépendances (GLFW, Dear ImGui, volk, Vulkan-Headers, zstd, MeshCodec) sont téléchargées par CMake. Les shaders sont déjà
 compilés en SPIR-V dans `src/app/shaders_spv.hpp` (à refaire avec `tools/gen_shaders.py` après une modification de
 `shaders/`). `te_tests` et `tests/compare.py` comparent les formats à ceux du modkit Python.
 
@@ -61,4 +69,5 @@ compilés en SPIR-V dans `src/app/shaders_spv.hpp` (à refaire avec `tools/gen_s
 
 Code de l'éditeur : écrit pour ce projet. Décodage ASTC HDR d'après l'encodeur de référence d'ARM (Apache 2.0).
 Dépendances : GLFW (zlib), Dear ImGui (MIT), volk (MIT), Vulkan-Headers (Apache 2.0), zstd (BSD), police DroidSans
-(Apache 2.0). Aucun fichier du jeu n'est inclus.
+(Apache 2.0), MeshCodec de dt-12345 (GPL-2.0, en partie d'après meshoptimizer, MIT). Comme il contient MeshCodec,
+l'exécutable est distribué sous GPL-2.0 ; `LICENSE-MeshCodec.txt` en donne le texte. Aucun fichier du jeu n'est inclus.

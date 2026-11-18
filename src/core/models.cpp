@@ -15,7 +15,7 @@ void ModelIndex::index() {
     for (auto& e : fs::directory_iterator(folder, ec)) names.push_back(pathStr(e.path().filename()));
     std::sort(names.begin(), names.end());
     for (auto& n : names) {
-        if (!endsWith(n, ".bfres.zs") || n.find(".anim.") != std::string::npos) continue;
+        if (!(endsWith(n, ".bfres.zs") || endsWith(n, ".bfres.mc")) || n.find(".anim.") != std::string::npos) continue;
         auto parts = split(n.substr(0, n.size() - 9), '.');
         if (parts.back() == "Skeleton" || endsWith(parts.back(), "_Animation")) continue;
         std::string rel = "Model/" + n;
@@ -117,12 +117,18 @@ std::string ModelIndex::path(const std::string& fmdb, const std::string& proj) {
     return "";
 }
 
-Mesh ModelIndex::load(const std::string& actor) {
+std::string ModelIndex::file(const std::string& actor) {
     if (actor.empty() || actor.find_first_of("\\/:*?\"<>|") != std::string::npos) throw Error("nom d'acteur invalide");
     auto inf = info(actor);
     if (!inf) throw Error("pas de ModelInfo pour " + actor);
     std::string rel = path(inf->first, inf->second);
     if (rel.empty()) throw Error("modèle " + inf->second + "." + inf->first + " introuvable dans Model/");
+    return rel;
+}
+
+Mesh ModelIndex::load(const std::string& actor) {
+    std::string rel = file(actor);
+    auto inf = info(actor);
     try {
         return bfresRead(game_.read(rel), inf->first);
     } catch (const std::exception& e) {

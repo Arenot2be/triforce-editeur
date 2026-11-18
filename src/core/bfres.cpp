@@ -10,6 +10,9 @@
 
 namespace te {
 
+const char* const MESHLETS = "géométrie en meshlets";
+const char* const MESHLETS_ALL = "géométrie en meshlets (décodée par la carte graphique du jeu) : pas encore lisible";
+
 namespace {
 struct Fmt { char ch; int n; double norm; };   // (norm 0 : pas de normalisation)
 const std::map<uint16_t, Fmt>& formats() {
@@ -320,7 +323,10 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     size_t bufferOffset;
     if (flags & (1 << 3)) {
         if (data.size() <= fileSize) throw Error(fmt("données graphiques dans un fichier séparé (drapeau %#x)", flags));
-        bufferOffset = fileSize + 288;
+        // (tampons décodés par MeshCodec : leur décalage est écrit à Align(taille, 8), voir meshcodec.cpp)
+        size_t sh = (size_t(fileSize) + 7) & ~size_t(7);
+        bufferOffset = sh + 8 <= data.size() ? r.u32(sh) : 0;
+        if (bufferOffset < sh + 8 || bufferOffset >= data.size()) bufferOffset = fileSize + 288;
     } else {
         size_t bi = r.ptr(0xB0);
         if (!bi) throw Error("pas de tampon de géométrie (BufferInfo)");
@@ -360,6 +366,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     for (int si = 0; si < nShapes; si++) {
         size_t sh = shapesP + size_t(si) * sStride;
         try {
+            // (drapeau 0x10 : géométrie en meshlets, décodée sur la carte graphique par les mesh shaders du jeu)
+            if (r.u8(sh + 4) & 0x10) throw Error(MESHLETS);
             auto [vo, vb] = findPtr(r, sh, 0x40, "FVTX");
             if (!vb) {
                 vo = sh + 0x10;
@@ -448,6 +456,9 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     }
     m.indices.resize(m.indices.size() - m.indices.size() % 3);
     if (!m.shapes) {
+        bool allMeshlets = !m.skipped.empty();
+        for (auto& s : m.skipped) if (s.find(MESHLETS) == std::string::npos) allMeshlets = false;
+        if (allMeshlets) throw Error(MESHLETS_ALL);
         std::string why;
         for (size_t k = 0; k < m.skipped.size() && k < 3; k++) why += (k ? "; " : "") + m.skipped[k];
         throw Error("aucune forme lisible : " + why);

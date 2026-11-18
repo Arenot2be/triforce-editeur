@@ -7,6 +7,7 @@
 #include "core/bntx.hpp"
 #include "core/game.hpp"
 #include "core/mapdoc.hpp"
+#include "core/meshcodec.hpp"
 #include "core/models.hpp"
 #include "core/terrain.hpp"
 #include "core/textmap.hpp"
@@ -34,7 +35,9 @@ int main(int argc, char** argv) {
             bool srgb = std::atoi(argv[3]) != 0, hdr = std::atoi(argv[4]) != 0;
             out(astcDecode(a.data() + 16, a.size() - 16, w, h, bw, bh, srgb, hdr, false), argv[5]);
         } else if (cmd == "bfres") {
-            Mesh m = bfresRead(readFile(u8path(argv[2])), argc > 3 ? argv[3] : "");
+            Bytes f = readFile(u8path(argv[2]));
+            if (isMeshCodec(f)) f = meshCodecUnpack(f);
+            Mesh m = bfresRead(f, argc > 3 ? argv[3] : "");
             std::printf("%zu %zu %zu", m.positions.size() / 3, m.indices.size(), m.subs.size());
             for (auto& s : m.subs) std::printf(" [%u %u %s]", s.start, s.count, s.tex.c_str());
             double sum = 0;
@@ -42,6 +45,8 @@ int main(int argc, char** argv) {
             for (float f : m.uvs) sum += f;
             for (uint32_t i : m.indices) sum += i;
             std::printf(" %.3f\n", sum);
+        } else if (cmd == "mc") {   // .bfres.mc -> BFRES et tampons décodés
+            out(meshCodecUnpack(readFile(u8path(argv[2]))), argv[3]);
         } else if (cmd == "bntx") {
             TexData t = bntxExtract(readFile(u8path(argv[2])), 512, argc > 4 ? argv[4] : "");
             std::printf("%d %d %d %d %08x\n", t.code, t.w, t.h, t.srgb ? 1 : 0, t.compSel);

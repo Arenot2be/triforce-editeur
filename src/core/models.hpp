@@ -17,6 +17,7 @@ public:
     // (FmdbName, ModelProjectName)
     std::optional<std::pair<std::string, std::string>> info(const std::string& actor, int depth = 0);
     std::string path(const std::string& fmdb, const std::string& proj);
+    std::string file(const std::string& actor);   // (le chemin Model/… de son modèle ; Error avec la raison)
     Mesh load(const std::string& actor);   // (Error avec la raison si pas de modèle)
 
 private:

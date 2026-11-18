@@ -1,4 +1,5 @@
 #include "core/game.hpp"
+#include "core/meshcodec.hpp"
 
 namespace te {
 
@@ -36,7 +37,11 @@ fs::path Game::path(const std::string& rel) const {
 }
 bool Game::exists(const std::string& rel) const { std::error_code ec; return fs::is_regular_file(path(rel), ec); }
 Bytes Game::raw(const std::string& rel) const { return readFile(path(rel)); }
-Bytes Game::read(const std::string& rel) const { return zs.unpack(raw(rel)); }
+Bytes Game::read(const std::string& rel) const {
+    Bytes r = raw(rel);
+    if (isMeshCodec(r)) return meshCodecUnpack(r);   // (.bfres.mc)
+    return zs.unpack(r);
+}
 
 std::shared_ptr<const Sarc> Game::pack(const std::string& rel) {
     {

@@ -163,6 +163,7 @@ public:
     std::map<std::string, TexSlot> texSlots;
     Jobs jobs{int(std::max(2u, std::min(8u, std::thread::hardware_concurrency())))};
     ModelSlot* model(const std::string& actor);
+    void exportModel(const std::string& actor);
     TexSlot* texture(const std::string& name);
     std::vector<std::string> scenes;
     std::string terrainScene;   // ("" : aucun)

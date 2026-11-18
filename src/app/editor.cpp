@@ -776,6 +776,24 @@ ModelSlot* Editor::model(const std::string& actor) {
     return &s;
 }
 
+// (pour l'analyse des formats pas encore lus : le modèle décompressé, dans Documents\Triforce-modkit\analyse)
+void Editor::exportModel(const std::string& actor) {
+    if (!models || !game) return;
+    try {
+        std::string rel = models->file(actor);
+        Bytes data = game->read(rel);
+        std::string name = rel.substr(rel.rfind('/') + 1);
+        for (auto ext : {".zs", ".mc"}) if (endsWith(name, ext)) name = name.substr(0, name.size() - 3);
+        fs::path dir = homeDir() / u8path("Documents") / u8path("Triforce-modkit") / u8path("analyse");
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        writeFileAtomic(dir / u8path(name), data);
+        say("Modèle décompressé écrit dans Documents\\Triforce-modkit\\analyse\\" + name);
+    } catch (const std::exception& e) {
+        say(std::string("Export impossible : ") + e.what(), true);
+    }
+}
+
 TexSlot* Editor::texture(const std::string& name) {
     auto it = texSlots.find(name);
     if (it != texSlots.end()) return &it->second;

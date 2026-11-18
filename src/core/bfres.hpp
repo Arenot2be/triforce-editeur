@@ -18,6 +18,8 @@ struct Mesh {
     int shapes = 0;
 };
 
+extern const char* const MESHLETS;       // (raison des formes en meshlets)
+extern const char* const MESHLETS_ALL;
 Mesh bfresRead(const Bytes& data, const std::string& prefer = "", size_t maxTriangles = 2000000);
 std::string albedo(const std::vector<std::string>& names);
 
