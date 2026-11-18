@@ -1,0 +1,43 @@
+// Les fichiers du jeu (romfs) et les dossiers du modkit, comme triforce_modkit/cli.py.
+#pragma once
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+
+#include "core/sarc.hpp"
+#include "core/zs.hpp"
+
+namespace te {
+
+struct Folders {
+    fs::path romfs, work, mods;
+    static Folders defaults();
+    static fs::path defaultMods(const fs::path& romfs);
+};
+
+class Game {
+public:
+    explicit Game(const fs::path& romfs);
+    fs::path romfs;
+    Zs zs;
+    fs::path path(const std::string& rel) const;
+    bool exists(const std::string& rel) const;
+    Bytes raw(const std::string& rel) const;
+    Bytes read(const std::string& rel) const;    // (décompressé)
+    std::shared_ptr<const Sarc> pack(const std::string& rel);   // (gardé en mémoire)
+    void forget(const std::string& rel);
+
+private:
+    std::mutex m_;
+    std::map<std::string, std::shared_ptr<const Sarc>> packs_;
+};
+
+bool isArchive(const std::string& name);
+fs::path workPath(const fs::path& work, const std::string& rel);   // (romfs/chemin, ou romfs/archive/membre pour « archive:membre »)
+
+// « Construire le mod » : les fichiers du dossier de travail -> mods/<nom>/romfs ; log reçoit chaque ligne du journal
+int buildMod(Game& game, const fs::path& work, const fs::path& mods, const std::string& name,
+             const std::function<void(const std::string&)>& log);
+
+}  // namespace te
