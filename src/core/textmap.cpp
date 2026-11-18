@@ -1,5 +1,6 @@
 #include "core/textmap.hpp"
 
+#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>

@@ -51,7 +51,7 @@ target_include_directories(te_core PUBLIC src ${zstd_SOURCE_DIR}/lib)
 target_link_libraries(te_core PUBLIC libzstd_static)
 if(WIN32)
   target_compile_definitions(te_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
-  target_link_libraries(te_core PUBLIC shell32)
+  target_link_libraries(te_core PUBLIC shell32 ole32)
 endif()
 
 add_executable(te_tests src/tests/tests.cpp)
