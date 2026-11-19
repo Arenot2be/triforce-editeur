@@ -396,7 +396,13 @@ std::vector<std::vector<std::string>> materialTextures(const R& r, size_t mdl, s
 
 int surfaceKind(const std::string& material, const std::vector<std::string>& textures) {
     std::string all = lower(material);
-    for (auto& t : textures) all += " " + lower(t);
+    // (les textures communes d'éclairage précalculé, « CmnTex_BakeLightDefault »…, sont dans presque tous les
+    //  matériaux : elles ne disent rien de la surface, et leur « light » faisait passer des parties pleines pour des lumières)
+    for (auto& t : textures) {
+        std::string l = lower(t);
+        if (l.rfind("cmntex_bake", 0) == 0 || l.rfind("dummy", 0) == 0) continue;
+        all += " " + l;
+    }
     auto has = [&](std::initializer_list<const char*> ws) {
         for (auto w : ws) if (all.find(w) != std::string::npos) return true;
         return false;
