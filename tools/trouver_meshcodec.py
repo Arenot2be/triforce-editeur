@@ -210,32 +210,166 @@ def run(code, out):
     return hits, refs, n
 
 
-def load_triforce(src):
-    sys.path.insert(0, os.path.join(src, "nx2"))
-    os.chdir(src)
-    import kit
-    import image as eden_image
-    import nx_image  # noqa: F401  (chargé par image)
-    img = eden_image.EdenImage(kit.need_exefs())
-    base = min(m.base for m in img.modules)
-    names = dict(getattr(img, "names", {}) or {})
-    return Code(base, bytes(img.mem), list(img.code), names)
+def lz4_block(src, size):
+    out = bytearray()
+    i, n = 0, len(src)
+    while i < n:
+        t = src[i]
+        i += 1
+        lit = t >> 4
+        if lit == 15:
+            while True:
+                b = src[i]
+                i += 1
+                lit += b
+                if b != 255:
+                    break
+        out += src[i:i + lit]
+        i += lit
+        if i >= n:
+            break
+        off = src[i] | src[i + 1] << 8
+        i += 2
+        m = t & 15
+        if m == 15:
+            while True:
+                b = src[i]
+                i += 1
+                m += b
+                if b != 255:
+                    break
+        m += 4
+        st = len(out) - off
+        if off >= m:
+            out += out[st:st + m]
+        else:
+            for k in range(m):
+                out.append(out[st + k])
+    if len(out) != size:
+        raise ValueError("LZ4 : %d octets au lieu de %d" % (len(out), size))
+    return bytes(out)
+
+
+def load_nso(path, src=None):
+    """(le module `main` du dump : segments texte, rodata, data à leur place en mémoire, base 0x80000000)"""
+    raw = open(path, "rb").read()
+    if raw[:4] != b"NSO0":
+        raise SystemExit("%s n'est pas un module NSO" % path)
+    flags = struct.unpack_from("<I", raw, 0xC)[0]
+    segs = [struct.unpack_from("<4I", raw, 0x10 + 0x10 * i) for i in range(3)]
+    csize = struct.unpack_from("<3I", raw, 0x60)
+    end = max(m + sz for (_, m, sz, _) in segs)
+    mem = bytearray(end)
+    for i, ((foff, moff, size, _), cs) in enumerate(zip(segs, csize)):
+        d = raw[foff:foff + cs]
+        if flags & (1 << 7):   # (ZBIC : décodé par l'outil de Triforce)
+            if not src:
+                raise SystemExit("main est compressé en ZBIC : donne aussi le dossier source de Triforce")
+            sys.path.insert(0, os.path.join(src, "nx2"))
+            import zbic
+            d = zbic.decompress(d, size)
+        elif flags & (1 << i):
+            print("  décompression LZ4 du segment %d (%d Mo)…" % (i, size >> 20))
+            d = lz4_block(d, size)
+        mem[moff:moff + len(d)] = d[:size]
+    base = 0x80000000
+    text = segs[0]
+    return Code(base, bytes(mem), [(base + text[1], base + text[1] + text[2], "main")], {})
+
+
+def find_dirs(name, roots, want, depth=4):
+    out = []
+    for r in roots:
+        if not os.path.isdir(r):
+            continue
+        for cur, dirs, files in os.walk(r):
+            if cur[len(r):].count(os.sep) >= depth:
+                dirs[:] = []
+                continue
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in ("node_modules", "appdata", "$recycle.bin")]
+            if os.path.basename(cur).lower() == name and os.path.exists(os.path.join(cur, want)):
+                out.append(cur)
+    return out
+
+
+def locate(args):
+    home = os.path.expanduser("~")
+    here = os.path.dirname(os.path.abspath(__file__))
+    exefs = src = None
+    for a in args:
+        a = os.path.abspath(a)
+        if os.path.isfile(os.path.join(a, "main")):
+            exefs = a
+        elif os.path.isfile(os.path.join(a, "exefs", "main")):
+            exefs = os.path.join(a, "exefs")
+        elif os.path.isfile(os.path.join(a, "nx2", "kit.py")):
+            src = a
+    if not src:
+        for d in [here, os.path.dirname(here), os.getcwd()]:
+            if os.path.isfile(os.path.join(d, "nx2", "kit.py")):
+                src = d
+                break
+    if not exefs and os.environ.get("OOT_EXEFS"):
+        exefs = os.environ["OOT_EXEFS"]
+    if not exefs and src:
+        cfg = os.path.join(src, "work", "dump.txt")
+        if os.path.exists(cfg):
+            for line in open(cfg, encoding="utf-8"):
+                line = line.strip()
+                if line and not line.startswith("#") and os.path.isfile(os.path.join(line, "exefs", "main")):
+                    exefs = os.path.join(line, "exefs")
+                    break
+    if not exefs:
+        print("Recherche du dossier exefs du dump (avec le fichier main)…")
+        roots = [os.path.join(home, d) for d in ("Games", "Desktop", "Bureau", "Documents", "Downloads", "Téléchargements")]
+        roots += [d + ":\\" for d in "CDEFG"] if os.name == "nt" else []
+        found = find_dirs("exefs", roots, "main")
+        if found:
+            exefs = found[0]
+    if not src:
+        roots = [os.path.join(home, d) for d in ("Desktop", "Bureau", "Documents", "Downloads", "Games")]
+        for d in find_dirs("source", roots, os.path.join("nx2", "kit.py")):
+            src = d
+            break
+    return exefs, src
 
 
 def main():
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    src = os.path.abspath(sys.argv[1])
-    dest = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.path.join(
-        os.path.expanduser("~"), "Documents", "Triforce-modkit", "analyse", "meshcodec_desassemblage.txt")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    dest = os.path.join(os.path.expanduser("~"), "Documents", "Triforce-modkit", "analyse", "meshcodec_desassemblage.txt")
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    print("Chargement du programme du jeu (comme les outils de Triforce)…")
-    code = load_triforce(src)
-    print("Recherche…")
-    with open(dest, "w", encoding="utf-8") as out:
-        hits, refs, n = run(code, out)
-    print("%d constantes, %d textes adressés, %d fonctions désassemblées" % (len(hits), len(refs), n))
-    print("Écrit dans " + dest)
+    try:
+        exefs, src = locate(args)
+        print("dossier exefs : %s" % exefs)
+        print("dossier source de Triforce : %s" % src)
+        if not exefs:
+            raise SystemExit("Dossier exefs introuvable : donne son chemin, ex.  python trouver_meshcodec.py \"C:\\...\\exefs\"")
+        if src:
+            sys.path.insert(0, os.path.join(src, "nx2"))
+        try:
+            import capstone  # noqa: F401
+        except ImportError:
+            print("ATTENTION : capstone absent de ce Python : le fichier contiendra les instructions brutes (lisibles quand même)")
+        print("Chargement de %s…" % os.path.join(exefs, "main"))
+        code = load_nso(os.path.join(exefs, "main"), src)
+        print("Recherche…")
+        with open(dest, "w", encoding="utf-8") as out:
+            out.write("exefs : %s\n\n" % exefs)
+            hits, refs, n = run(code, out)
+        print("%d constantes, %d textes adressés, %d fonctions désassemblées" % (len(hits), len(refs), n))
+        print("Écrit dans " + dest)
+    except BaseException as e:   # (toujours un fichier, avec l'erreur, pour savoir ce qui a coincé)
+        import traceback
+        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+        print("ERREUR :\n" + msg)
+        with open(dest, "w", encoding="utf-8") as out:
+            out.write("ERREUR\n" + msg)
+        print("Erreur écrite dans " + dest)
+    if "--sans-pause" not in sys.argv:
+        try:
+            input("\nAppuie sur Entrée pour fermer…")
+        except EOFError:
+            pass
 
 
 if __name__ == "__main__":
