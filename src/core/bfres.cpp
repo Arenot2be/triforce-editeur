@@ -241,10 +241,10 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
     uint32_t count = rd32(d, hdr + 20);
     size_t recSize = 8 * size_t(4 + std::popcount(flags & 0xC00u) + std::popcount(flags & 0x1F000u));
     size_t base = hdr + 84;
-    // (les mots des bits 0xC00, sans doute la couleur des sommets, suivent ceux des attributs à 2 composantes ; leurs
-    // bits par sommet, s'il y en a, viennent après les coordonnées de texture : vu avec 0 bit, donc supposé)
+    // (d'après les mesh shaders du jeu : entre la tangente et les attributs à 2 composantes peuvent se trouver des
+    // attributs réglés par le matériau, de (8 ou 32 bits) × (1 à 4 composantes) ; les attributs à 2 composantes
+    // terminent le sommet. Les bits en trop par rapport à la disposition connue sont donc avant eux.)
     int n2d = std::popcount(flags & 0x1F000u);
-    bool extra = (flags & 0xC00u) != 0;
     bool uvOk = n2d > 0;
     if (!uvOk) uvWhy = fmt("pas de coordonnées de texture (drapeaux %#x)", flags);
     if (!count || base + recSize * count > end) throw Error("meshlets : descripteurs hors du tampon");
@@ -283,7 +283,8 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
             }
             total += a + c;
         }
-        bool hasUv = uvOk && (extra ? total <= stride : total == stride);
+        bool hasUv = uvOk && total <= stride && stride - total <= 4 * 4 * 32;
+        if (hasUv) uvAt += stride - total;   // (attributs du matériau, de taille inconnue ici)
         for (unsigned i = 0; i < vc; i++) {
             size_t p = start + size_t(i) * stride;
             for (int a = 0; a < 3; a++) {
