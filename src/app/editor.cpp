@@ -585,11 +585,16 @@ void Editor::render(VkCommandBuffer c) {
             rend.lines.push_back({{float(gx + n * step), float(y), b}, {col[0], col[1], col[2], col[3]}});
         }
     }
-    struct Late { const GpuMesh* g; PC pc; };
+    struct Late { const GpuMesh* g; PC pc; std::vector<Renderer::SubTex> tex; };
     std::vector<Late> late;   // (parties transparentes, dessinées après tout le reste)
     if (hasMap) {
         rend.bindMesh(c);
-        std::vector<VkDescriptorSet> sets;
+        std::vector<Renderer::SubTex> sets;
+        auto ready = [&](const std::string& n) -> VkDescriptorSet {
+            if (n.empty()) return VK_NULL_HANDLE;
+            TexSlot* t = texture(n);
+            return t && t->st == TexSlot::Ok ? t->tex.set : VK_NULL_HANDLE;
+        };
         for (auto& L : doc.layers) {
             if (!L.visible) continue;
             for (auto& r : L.recs) {
@@ -612,14 +617,14 @@ void Editor::render(VkCommandBuffer c) {
                     for (int k = 0; k < 3; k++) pc.color[k] = 0.72f + 0.2f * (cc[k] - 0.72f);
                     g = &ms->gpu;
                     bb = g->bbox;
-                    sets.assign(g->subs.size(), VK_NULL_HANDLE);
+                    sets.assign(g->subs.size(), Renderer::SubTex{});
                     for (size_t i = 0; i < g->subs.size(); i++) {
                         if (!showTextures || g->subs[i].tex.empty()) continue;
-                        TexSlot* t = texture(g->subs[i].tex);
-                        if (t && t->st == TexSlot::Ok) sets[i] = t->tex.set;
+                        auto& s = g->subs[i];
+                        sets[i] = {ready(s.tex), ready(s.tex2), ready(s.detail)};
                     }
                     rend.drawMesh(c, *g, pc, sets);
-                    if (g->translucent) late.push_back({g, pc});
+                    if (g->translucent) late.push_back({g, pc, sets});
                 } else {
                     bool quiet = false;
                     for (auto q : QUIET) if (catOf(name) == q) quiet = true;
@@ -662,8 +667,7 @@ void Editor::render(VkCommandBuffer c) {
             rend.drawWater(c, *l.g, l.pc, nrm, flow, sgn, time);
         }
         vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, rend.meshBlendPipe);
-        std::vector<VkDescriptorSet> none;
-        for (auto& l : late) rend.drawMesh(c, *l.g, l.pc, none, true);
+        for (auto& l : late) rend.drawMesh(c, *l.g, l.pc, l.tex, true);
     }
     rend.drawLines(c, base);
 }
@@ -871,7 +875,7 @@ TexSlot* Editor::texture(const std::string& name) {
                 throw Error("introuvable : ni Tex/" + name + ".bntx.zs, ni dans un autre fichier de Tex/" +
                             (where.empty() ? std::string(" ; aucun fichier du jeu ne porte ce nom") : " ; fichiers à ce nom : " + where));
             }
-            r->t = bntxExtract(g->readTex(rel), 512, want);
+            r->t = bntxExtract(g->readTex(rel), 1024, want);
             if (r->t.code == 5 || r->t.code == 6) r->kind = 2;   // (BC4, BC5 : masques ou reliefs, pas des couleurs)
             else if (r->t.code == 8) throw Error("format BC6H (HDR) non affiché");
             else if (r->t.code >= 20) {

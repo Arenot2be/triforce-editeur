@@ -184,6 +184,17 @@ struct Attr { std::string name; bool named = false; uint16_t format = 0, offset 
 struct Buf { size_t start, stride, size; };
 
 std::vector<std::array<double, 4>> attrValues(const R& r, const Buf& b, const Attr& a, size_t count) {
+    if (a.format == 0x020e) {   // (10-10-10-2 signés : normales et tangentes)
+        if (b.start + a.offset + (count - 1) * b.stride + 4 > b.start + b.size || b.start + b.size > r.n)
+            throw Error("tampon de sommets hors du fichier");
+        std::vector<std::array<double, 4>> out(count);
+        for (size_t i = 0; i < count; i++) {
+            uint32_t w = r.u32(b.start + i * b.stride + a.offset);
+            auto s10 = [](uint32_t v) { int x = int(v & 1023); if (x >= 512) x -= 1024; return std::max(-1.0, x / 511.0); };
+            out[i] = {s10(w), s10(w >> 10), s10(w >> 20), double(int(w >> 30))};
+        }
+        return out;
+    }
     auto it = formats().find(a.format);
     if (it == formats().end()) throw Error(fmt("format d'attribut %#x non pris en charge", a.format));
     const Fmt& f = it->second;
@@ -419,6 +430,7 @@ std::string albedo(const std::vector<std::string>& names) {
     for (auto& n : names) {
         if (n.empty()) continue;
         std::string l = lower(n);
+        if (l.find("detailmap") != std::string::npos || l.rfind("cmntex_", 0) == 0) continue;
         if (endsWith(l, "_alb") || l.find("_alb_") != std::string::npos || endsWith(l, "_albedo")) return n;
     }
     for (auto& n : names) {
@@ -481,6 +493,16 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     // (partie sans texture de couleur : eau, fondu, verre… d'après les noms du matériau et de ses textures)
     auto subOf = [&](uint32_t start, uint32_t count, int matIdx, const std::string& tex) {
         Mesh::Sub s{start, count, tex, 0, size_t(matIdx) < matNames.size() ? matNames[size_t(matIdx)] : ""};
+        // (matériaux en couches : une texture de détail répétée, et une seconde couleur — la mousse — fondue d'après la
+        //  couleur des sommets ; « _sl » : couche posée par-dessus, son opacité dans l'alpha des sommets)
+        if (!tex.empty() && size_t(matIdx) < materials.size())
+            for (auto& n : materials[size_t(matIdx)]) {
+                std::string l = lower(n);
+                if (!(endsWith(l, "_alb") || l.find("_alb_") != std::string::npos) || n == tex) continue;
+                if (l.find("detailmap") != std::string::npos) { if (s.detail.empty()) s.detail = n; }
+                else if (l.rfind("cmntex_", 0) != 0 && s.tex2.empty()) s.tex2 = n;
+            }
+        if (!tex.empty() && endsWith(lower(s.material), "_sl")) s.kind = 4;
         if (tex.empty()) s.kind = surfaceKind(s.material, size_t(matIdx) < materials.size() ? materials[size_t(matIdx)] : std::vector<std::string>{});
         // (eau : sa carte de normales, pour les vagues)
         if (s.kind == 1 && size_t(matIdx) < materials.size())
@@ -528,6 +550,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                     m.positions.push_back(float(x)); m.positions.push_back(float(y)); m.positions.push_back(float(z));
                     m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2]);
                     m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2 + 1]);
+                    m.colors.insert(m.colors.end(), {1.f, 1.f, 1.f, 1.f});
+                    m.normals.insert(m.normals.end(), {0.f, 0.f, 0.f});
                 }
                 for (uint32_t v : ids) m.indices.push_back(base + v);
                 int matIdx = r.u16(tail + 2);
@@ -564,6 +588,22 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
             std::vector<std::array<double, 4>> uvs;
             if (ua && ua != pa && ua->buffer < bufs.size()) {
                 try { uvs = attrValues(r, bufs[ua->buffer], *ua, vcount); } catch (...) { uvs.clear(); }
+            }
+            std::vector<std::array<double, 4>> cols, nrms;
+            bool colLight = false;   // (couleur des sommets en demi-flottants, grise, autour de 1 : éclairage précalculé)
+            for (auto& a : attrs) {
+                if (a.named && a.name == "_c0" && a.buffer < bufs.size() && cols.empty()) {
+                    try { cols = attrValues(r, bufs[a.buffer], a, vcount); } catch (...) { cols.clear(); }
+                    if (!cols.empty() && (a.format >> 8) == 0x05) {
+                        bool grey = true;
+                        double sum = 0;
+                        for (auto& q : cols) { grey &= std::fabs(q[0] - q[1]) < 0.02 && std::fabs(q[0] - q[2]) < 0.02; sum += q[0]; }
+                        double mean = sum / double(cols.size());
+                        colLight = grey && mean > 0.3 && mean < 2.5;
+                    }
+                }
+                if (a.named && a.name == "_n0" && a.buffer < bufs.size() && nrms.empty())
+                    try { nrms = attrValues(r, bufs[a.buffer], a, vcount); } catch (...) { nrms.clear(); }
             }
             std::vector<const M34*> mats;
             if (!world.empty()) {
@@ -614,6 +654,22 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 m.positions.push_back(float(x)); m.positions.push_back(float(y)); m.positions.push_back(float(z));
                 m.uvs.push_back(uvs.empty() ? 0.f : float(uvs[k][0]));
                 m.uvs.push_back(uvs.empty() ? 0.f : float(uvs[k][1]));
+                if (nrms.size() == vcount) {
+                    double a = nrms[k][0], b = nrms[k][1], c = nrms[k][2];
+                    if (!mats.empty()) {
+                        const M34& M = *mats[k];
+                        double na = M[0] * a + M[1] * b + M[2] * c, nb = M[4] * a + M[5] * b + M[6] * c, nc = M[8] * a + M[9] * b + M[10] * c;
+                        a = na; b = nb; c = nc;
+                    }
+                    double l = std::sqrt(a * a + b * b + c * c);
+                    if (l > 1e-9) { a /= l; b /= l; c /= l; }
+                    m.normals.insert(m.normals.end(), {float(a), float(b), float(c)});
+                } else
+                    m.normals.insert(m.normals.end(), {0.f, 0.f, 0.f});
+                // (couleurs gardées : r = éclairage précalculé des sommets (1 = neutre), a = opacité des couches « _sl »)
+                float light = colLight && cols.size() == vcount ? float(std::clamp(cols[k][0], 0.0, 2.5)) : 1.f;
+                float alpha = cols.size() == vcount ? float(cols[k][3]) : 1.f;
+                m.colors.insert(m.colors.end(), {light, light, light, alpha});
             }
             for (uint32_t v : ids) m.indices.push_back(base + v + first);
             std::string tex = !uvs.empty() && size_t(matIdx) < materials.size() ? albedo(materials[size_t(matIdx)]) : "";
