@@ -16,7 +16,15 @@ import sys
 
 TARGETS = {"MCPK": 0x4B50434D, "FMSH": 0x48534D46}
 TEXTS = [b"MeshCodec", b"Meshoptimizer", b"MCPK", b"FMSH"]
-MAX_FUNCS = 90          # (fonctions désassemblées au plus)
+# (tables fixes du décodeur MeshCodec, d'après sa réimplémentation libre : leurs octets dans le programme)
+PATTERNS = {
+    "table des groupes de sommets (MeshCodec)": struct.pack("<14I", 1, 0, 1, 2, 1, 4, 1, 6, 2, 8, 2, 0xC, 3, 0x10),
+    "table des index (MeshCodec/meshoptimizer)": bytes([0x00, 0x76, 0x87, 0x56, 0x67, 0x78, 0xA9, 0x86, 0x65, 0x89, 0x68, 0x98, 0x01, 0x69]),
+    "table LL_base (zstd)": struct.pack("<20I", *range(16), 16, 18, 20, 22),
+    "table ML_base (zstd)": struct.pack("<16I", *range(3, 19)),
+}
+CALLER_DEPTH = 4
+MAX_FUNCS = 140         # (fonctions désassemblées au plus)
 MAX_FUNC_BYTES = 0x6000  # (taille d'une fonction au plus)
 DEPTH = 3
 
@@ -105,6 +113,51 @@ def find_text_refs(code):
     return found, refs
 
 
+def find_refs(code, want):
+    """(code qui calcule une adresse dans une des zones `want` {adresse: (taille, nom)} : adrp + add, ou adrp + ldr)"""
+    refs = []
+    if not want:
+        return refs
+    items = sorted(want.items())
+    for lo, hi, mod in code.ranges:
+        ws = code.words(lo, hi)
+        for i, w in enumerate(ws):
+            if (w & 0x9F000000) != 0x90000000:
+                continue
+            pc = lo + 4 * i
+            imm = sx(((w >> 29) & 3) | (((w >> 5) & 0x7FFFF) << 2), 21)
+            page = (pc & ~0xFFF) + (imm << 12)
+            rd = w & 31
+            for j in range(i + 1, min(i + 8, len(ws))):
+                k = ws[j]
+                tgt = None
+                if (k & 0xFFC00000) == 0x91000000 and ((k >> 5) & 31) == rd:
+                    tgt = page + ((k >> 10) & 0xFFF)
+                elif (k & 0x3B400000) == 0x39400000 and ((k >> 5) & 31) == rd:   # (ldr/ldrb/ldrh, décalage non signé)
+                    tgt = page + (((k >> 10) & 0xFFF) << (k >> 30))
+                if tgt is None:
+                    continue
+                for a, (n, label) in items:
+                    if a <= tgt < a + n:
+                        refs.append((pc, label))
+                break
+    return refs
+
+
+def callers_of(code, targets):
+    """(appels bl vers les fonctions `targets` : {cible: [adresses d'appel]})"""
+    out = {t: [] for t in targets}
+    for lo, hi, mod in code.ranges:
+        ws = code.words(lo, hi)
+        for i, w in enumerate(ws):
+            if (w >> 26) == 0x25 or (w >> 26) == 0x05:
+                pc = lo + 4 * i
+                t = pc + 4 * sx(w & 0x3FFFFFF, 26)
+                if t in out and len(out[t]) < 12:
+                    out[t].append(pc)
+    return out
+
+
 def is_prologue(w):
     return ((w & 0xFFC07FFF) == 0xA9807BFD      # stp x29, x30, [sp, #-n]!
             or (w & 0xFF8003FF) == 0xD10003FF   # sub sp, sp, #n
@@ -189,9 +242,42 @@ def run(code, out):
     out.write("\n== code qui adresse ces textes : %d\n" % len(refs))
     for pc, t in refs:
         out.write("  %#x « %s »  (dans %s)\n" % (pc, t, name_of(code, pc, True)))
+    tabs = {}
+    for label, pat in PATTERNS.items():
+        a = code.mem.find(pat)
+        while a >= 0 and len(tabs) < 30:
+            tabs[code.base + a] = (len(pat) + 64, label)
+            a = code.mem.find(pat, a + 1)
+    out.write("\n== tables du décodeur trouvées : %d\n" % len(tabs))
+    for a, (n, label) in sorted(tabs.items()):
+        out.write("  %#x %s\n" % (a, label))
+    trefs = find_refs(code, tabs)
+    out.write("\n== code qui lit ces tables : %d\n" % len(trefs))
+    for pc, label in trefs:
+        out.write("  %#x %s  (dans %s)\n" % (pc, label, name_of(code, pc, True)))
     marks = {pc: n for pc, n in hits}
     marks.update({pc: "texte « %s »" % t for pc, t in refs})
-    queue = [(func_start(code, pc), 0) for pc in list(marks)]
+    marks.update({pc: label for pc, label in trefs if "zstd" not in label})
+    # (qui appelle ces fonctions, en remontant : c'est là que le conteneur .bfres.mc est lu)
+    level = {func_start(code, pc) for pc in marks}
+    up = []
+    seen_up = set(level)
+    for d in range(CALLER_DEPTH):
+        if not level:
+            break
+        cs = callers_of(code, level)
+        nxt = set()
+        out.write("\n== appelants, niveau %d\n" % (d + 1))
+        for t, pcs in cs.items():
+            out.write("  %s <- %s\n" % (name_of(code, t), ", ".join("%#x" % p for p in pcs) or "(aucun appel direct)"))
+            for p in pcs:
+                f = func_start(code, p)
+                if f not in seen_up:
+                    seen_up.add(f)
+                    nxt.add(f)
+                    up.append((f, -(d + 1)))
+        level = nxt
+    queue = up[::-1] + [(func_start(code, pc), 0) for pc in list(marks)]
     seen = set()
     n = 0
     while queue and n < MAX_FUNCS:
@@ -203,7 +289,7 @@ def run(code, out):
         n += 1
         out.write("\n\n==== %s  [%#x, %#x)  niveau %d\n" % (name_of(code, start), start, end, depth))
         disasm(code, start, end, out, marks)
-        if depth < DEPTH:
+        if 0 <= depth < DEPTH:
             for t in callees(code, start, end):
                 queue.append((func_start(code, t), depth + 1))
     out.write("\n\n== %d fonctions désassemblées%s\n" % (n, " (limite atteinte)" if queue else ""))
