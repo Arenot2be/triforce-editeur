@@ -149,12 +149,12 @@ def callees(code, lo, hi):
     return out
 
 
-def name_of(code, pc):
+def name_of(code, pc, inside=False):
     import bisect
     j = bisect.bisect_right(code.sorted_names, pc) - 1
     if j >= 0 and pc - code.sorted_names[j] < 0x10000:
         n = code.names[code.sorted_names[j]]
-        return n if pc == code.sorted_names[j] else "sub_%x (après %s+%#x)" % (pc, n, pc - code.sorted_names[j])
+        return n if pc == code.sorted_names[j] else ("%s+%#x" % (n, pc - code.sorted_names[j]) if inside else "sub_%x" % pc)
     return "sub_%x" % pc
 
 
@@ -182,13 +182,13 @@ def run(code, out):
     texts, refs = find_text_refs(code)
     out.write("== constantes MCPK / FMSH construites dans le code : %d\n" % len(hits))
     for pc, n in hits:
-        out.write("  %#x %s  (%s)\n" % (pc, n, name_of(code, pc)))
+        out.write("  %#x %s  (dans %s)\n" % (pc, n, name_of(code, pc, True)))
     out.write("\n== textes trouvés : %d\n" % len(texts))
     for a, t in texts:
         out.write("  %#x « %s »\n" % (a, t))
     out.write("\n== code qui adresse ces textes : %d\n" % len(refs))
     for pc, t in refs:
-        out.write("  %#x « %s »  (%s)\n" % (pc, t, name_of(code, pc)))
+        out.write("  %#x « %s »  (dans %s)\n" % (pc, t, name_of(code, pc, True)))
     marks = {pc: n for pc, n in hits}
     marks.update({pc: "texte « %s »" % t for pc, t in refs})
     queue = [(func_start(code, pc), 0) for pc in list(marks)]
