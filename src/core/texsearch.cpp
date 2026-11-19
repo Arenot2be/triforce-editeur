@@ -125,7 +125,15 @@ void searchTextures(Game& g, TexSearch& s, int threads) {
             std::fill(hitFile.begin(), hitFile.end(), 0);
             try {
                 Bytes d;
-                try { d = g.read(rel); } catch (...) { d = g.raw(rel); s.errors++; }
+                try {
+                    d = g.read(rel);
+                } catch (const std::exception& e) {
+                    d = g.raw(rel);
+                    s.errors++;
+                    std::lock_guard<std::mutex> lk(s.m);
+                    s.bad.emplace_back(rel, fmt("%s (%zu octets, début %02X %02X %02X %02X)", e.what(), d.size(), d.size() > 0 ? d[0] : 0,
+                                                d.size() > 1 ? d[1] : 0, d.size() > 2 ? d[2] : 0, d.size() > 3 ? d[3] : 0));
+                }
                 s.bytes += d.size();
                 scan(d, rel, 0);
             } catch (...) { s.errors++; }
@@ -139,6 +147,26 @@ void searchTextures(Game& g, TexSearch& s, int threads) {
     std::vector<std::thread> th;
     for (int t = 0; t < std::max(1, threads); t++) th.emplace_back(work);
     for (auto& t : th) t.join();
+    // (les autres rôles du même matériau : présents dans le jeu ou non)
+    std::vector<std::string> sib(n);
+    for (size_t k = 0; k < n; k++) {
+        std::string nm = s.names[k];
+        auto u = nm.rfind('_');
+        if (u == std::string::npos) continue;
+        std::string stem = nm.substr(0, u + 1);
+        for (const char* r : {"Alb", "Nrm", "Rgh", "Mtl", "Emm", "Emc", "Spm", "Trm", "AO", "Hgt"}) {
+            std::string t = stem + r;
+            std::string where;
+            try { where = g.texFile(t); } catch (...) {}
+            if (!where.empty()) sib[k] += "     " + t + " : présente (" + where + ")\n";
+            else if (t == nm) sib[k] += "     " + t + " : absente\n";
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lk(s.m);
+        s.siblings = sib;
+        std::sort(s.bad.begin(), s.bad.end());
+    }
     s.finished = true;
 }
 
@@ -153,6 +181,7 @@ std::string TexSearch::report() const {
             for (auto& u : usable[k]) o += "     " + u + "\n";
         } else
             o += "   aucune texture BNTX ne porte ce nom.\n";
+        if (k < siblings.size()) o += "   textures du même matériau dans le jeu :\n" + siblings[k];
         size_t nf = k < files.size() ? files[k] : 0;
         if (k < seen.size() && !seen[k].empty()) {
             o += fmt("   la famille apparaît dans %zu fichier(s) ; textes trouvés :\n", nf);
@@ -161,6 +190,10 @@ std::string TexSearch::report() const {
             for (auto& e : v) o += "     « " + e.text + " »  dans " + e.where + "\n";
         } else
             o += "   la famille de noms n'apparaît dans aucun fichier.\n";
+    }
+    if (!bad.empty()) {
+        o += fmt("\n== Fichiers illisibles : %zu (fouillés tels quels)\n", bad.size());
+        for (auto& [f, w] : bad) o += "   " + f + " : " + w + "\n";
     }
     return o;
 }

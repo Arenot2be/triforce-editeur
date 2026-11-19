@@ -20,6 +20,8 @@ struct TexSearch {
     std::vector<std::vector<Seen>> seen;          // (par nom : textes du jeu qui contiennent sa famille de noms)
     std::vector<std::vector<std::string>> usable; // (par nom : emplacements d'une texture BNTX qui la contient)
     std::vector<size_t> files;                    // (par nom : nombre de fichiers où sa famille apparaît)
+    std::vector<std::string> siblings;            // (par nom : les autres textures du même matériau, présentes ou non)
+    std::vector<std::pair<std::string, std::string>> bad;   // (fichiers illisibles : chemin, raison)
     std::string report() const;
 };
 
