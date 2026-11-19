@@ -649,19 +649,28 @@ void dialogs(Editor& ed, bool& quit) {
     }
     modal("Textures à problème", U.showTex);
     if (ImGui::BeginPopupModal("Textures à problème", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::BeginChild("##tex", {820, 420}, ImGuiChildFlags_Borders);
+        // (texte sélectionnable : souris ou Ctrl+A puis Ctrl+C ; « Tout copier » pour la liste entière)
+        std::string all;
+        int count = 0;
         for (auto& [n, t] : ed.texSlots) {
             if (t.st != TexSlot::None) continue;
-            ImGui::TextWrapped("%s", texLine(ed, n).c_str());
+            count++;
+            all += texLine(ed, n) + "\n";
             std::string users;
             int k = 0;
             for (auto& [a, m] : ed.modelSlots)
                 if (m.st == ModelSlot::Ok)
                     for (auto& sb : m.gpu.subs)
                         if (sb.tex == n && k++ < 4) { users += (users.empty() ? "" : ", ") + a; break; }
-            if (!users.empty()) ImGui::TextDisabled("    utilisée par %s%s", users.c_str(), k > 4 ? "…" : "");
+            if (!users.empty()) all += "    utilisée par " + users + (k > 4 ? "…" : "") + "\n";
         }
-        ImGui::EndChild();
+        if (!count) all = "Aucune texture à problème pour l'instant.\n";
+        ImGui::InputTextMultiline("##tex", &all, {820, 420}, ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::Button("Tout copier")) {
+            ImGui::SetClipboardText(all.c_str());
+            ed.say(fmt("%d textures copiées dans le presse-papiers", count));
+        }
+        ImGui::SameLine();
         if (ImGui::Button("Fermer")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
@@ -728,6 +737,8 @@ void shortcuts(Editor& ed) {
     if (!ctrl && ImGui::IsKeyPressed(ImGuiKey_R, false) && !ed.sel.empty()) ed.rotateSel(1, io.KeyShift ? 3.14159265358979323846 / 2 : -3.14159265358979323846 / 2);
 }
 }  // namespace
+
+void uiShowTextures() { U.showTex = true; }   // (commande de script « textures »)
 
 void drawUI(Editor& ed, bool& quit, bool closeRequested) {
     if (closeRequested) {

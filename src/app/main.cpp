@@ -20,6 +20,7 @@ namespace te {
 extern const uint8_t FONT_DROIDSANS[];
 extern const size_t FONT_DROIDSANS_SIZE;
 void drawUI(Editor& ed, bool& quit, bool closeRequested);
+void uiShowTextures();
 }
 
 using namespace te;
@@ -171,6 +172,7 @@ int run(int argc, char** argv) {
                 else if (cmd == "rotate") ed.rotateSel(1, std::atof(arg.c_str()) * 3.14159265358979323846 / 180);
                 else if (cmd == "move") ed.moveSel({std::atof(arg.c_str()), 0, 0});
                 else if (cmd == "top") ed.cam.top = !ed.cam.top;
+                else if (cmd == "textures") uiShowTextures();
                 else if (cmd == "tilt") ed.tilt = !ed.tilt;
                 else if (cmd == "terrain") ed.setTerrain(arg);
                 else if (cmd == "orbit") { auto p = split(arg, ' '); ed.cam.yaw = std::atof(p[0].c_str()); ed.cam.pitch = std::atof(p[1].c_str()); ed.cam.dist = std::atof(p[2].c_str()); }
