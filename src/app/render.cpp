@@ -1,5 +1,6 @@
 #include "app/render.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 #include "app/shaders_spv.hpp"
@@ -9,7 +10,7 @@ namespace te {
 
 VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs, size_t fsz, uint32_t stride,
                               const std::vector<VkVertexInputAttributeDescription>& attrs, VkPrimitiveTopology topo, bool depthTest,
-                              bool depthWrite, bool cull) {
+                              bool depthWrite, bool cull, bool blend) {
     VkShaderModule v = vk.shader(vs, vsz), f = vk.shader(fs, fsz);
     VkPipelineShaderStageCreateInfo st[2]{};
     st[0] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, v, "main", nullptr};
@@ -38,7 +39,7 @@ VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs
     ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     VkPipelineColorBlendAttachmentState cb{};
     cb.colorWriteMask = 0xF;
-    cb.blendEnable = topo == VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    cb.blendEnable = blend || topo == VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     cb.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     cb.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     cb.colorBlendOp = VK_BLEND_OP_ADD;
@@ -82,6 +83,9 @@ void Renderer::init() {
     check(vkCreatePipelineLayout(vk.dev, &lc, nullptr, &layout), "vkCreatePipelineLayout");
     meshPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 20,
                         {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
+    meshBlendPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 20,
+                             {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false,
+                             false, true);
     {
         VkDescriptorSetLayout sets[3] = {vk.texLayout, vk.texLayout, vk.texLayout};
         VkPipelineLayoutCreateInfo tl = lc;
@@ -129,7 +133,10 @@ GpuMesh Renderer::upload(const Mesh& m) {
     }
     g.vb = vk.upload(v.data(), v.size() * 4, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     g.ib = vk.upload(m.indices.data(), m.indices.size() * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    for (auto& s : m.subs) g.subs.push_back({s.start, s.count, s.tex});
+    for (auto& s : m.subs) {
+        g.subs.push_back({s.start, s.count, s.tex, s.tex.empty() ? s.kind : 0});
+        if (s.tex.empty() && s.kind) g.translucent = true;
+    }
     std::memcpy(g.bbox, m.bbox, sizeof g.bbox);
     g.tris = m.indices.size() / 3;
     return g;
@@ -177,12 +184,20 @@ void Renderer::bindMesh(VkCommandBuffer c) {
     vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipe);
 }
 
-void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& tex) {
+void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& tex, bool translucent) {
+    if (translucent && !g.translucent) return;
     VkDeviceSize off = 0;
     vkCmdBindVertexBuffers(c, 0, 1, &g.vb.buf, &off);
     vkCmdBindIndexBuffer(c, g.ib.buf, 0, VK_INDEX_TYPE_UINT32);
     for (size_t i = 0; i < g.subs.size(); i++) {
+        if ((g.subs[i].kind != 0) != translucent) continue;
         PC p = pc;
+        if (translucent) {
+            // (eau : bleu-vert ; fondu ou lumière : blanc très léger ; verre ou glace : bleu pâle)
+            static const float K[4][4] = {{0, 0, 0, 1}, {0.22f, 0.42f, 0.52f, 0.5f}, {1.f, 1.f, 0.95f, 0.12f}, {0.75f, 0.85f, 0.9f, 0.3f}};
+            int k = std::clamp(g.subs[i].kind, 0, 3);
+            for (int q = 0; q < 4; q++) p.color[q] = K[k][q];
+        }
         VkDescriptorSet set = i < tex.size() && tex[i] ? tex[i] : white.set;
         p.scale[3] = set != white.set ? 1.f : 0.f;
         vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
@@ -244,7 +259,7 @@ void Renderer::destroy() {
     free(cube);
     vk.free(white);
     vk.free(whiteArr);
-    for (auto p : {meshPipe, terrPipe, linePipe, lineTopPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
+    for (auto p : {meshPipe, meshBlendPipe, terrPipe, linePipe, lineTopPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
     vkDestroyPipelineLayout(vk.dev, layout, nullptr);
     vkDestroyPipelineLayout(vk.dev, terrLayout, nullptr);
 }

@@ -583,6 +583,8 @@ void Editor::render(VkCommandBuffer c) {
             rend.lines.push_back({{float(gx + n * step), float(y), b}, {col[0], col[1], col[2], col[3]}});
         }
     }
+    struct Late { const GpuMesh* g; PC pc; };
+    std::vector<Late> late;   // (parties transparentes, dessinées après tout le reste)
     if (hasMap) {
         rend.bindMesh(c);
         std::vector<VkDescriptorSet> sets;
@@ -615,6 +617,7 @@ void Editor::render(VkCommandBuffer c) {
                         if (t && t->st == TexSlot::Ok) sets[i] = t->tex.set;
                     }
                     rend.drawMesh(c, *g, pc, sets);
+                    if (g->translucent) late.push_back({g, pc});
                 } else {
                     bool quiet = false;
                     for (auto q : QUIET) if (catOf(name) == q) quiet = true;
@@ -628,6 +631,11 @@ void Editor::render(VkCommandBuffer c) {
                 }
             }
         }
+    }
+    if (!late.empty()) {
+        vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, rend.meshBlendPipe);
+        std::vector<VkDescriptorSet> none;
+        for (auto& l : late) rend.drawMesh(c, *l.g, l.pc, none, true);
     }
     rend.drawLines(c, base);
 }

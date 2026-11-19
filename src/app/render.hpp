@@ -19,8 +19,9 @@ static_assert(sizeof(PC) == 128, "constantes de 128 octets");
 
 struct GpuMesh {
     VkBuf vb, ib;
-    struct Sub { uint32_t start, count; std::string tex; };
+    struct Sub { uint32_t start, count; std::string tex; int kind = 0; };
     std::vector<Sub> subs;
+    bool translucent = false;   // (a des parties d'eau, de fondu ou de verre)
     float bbox[6] = {0, 0, 0, 0, 0, 0};
     size_t tris = 0;
 };
@@ -33,7 +34,7 @@ public:
     explicit Renderer(Vk& v) : vk(v) {}
     Vk& vk;
     VkPipelineLayout layout = VK_NULL_HANDLE, terrLayout = VK_NULL_HANDLE;
-    VkPipeline meshPipe = VK_NULL_HANDLE, terrPipe = VK_NULL_HANDLE, linePipe = VK_NULL_HANDLE, lineTopPipe = VK_NULL_HANDLE;
+    VkPipeline meshBlendPipe = VK_NULL_HANDLE, meshPipe = VK_NULL_HANDLE, terrPipe = VK_NULL_HANDLE, linePipe = VK_NULL_HANDLE, lineTopPipe = VK_NULL_HANDLE;
     VkTex white, whiteArr;
     GpuMesh cube;
 
@@ -58,14 +59,17 @@ public:
     std::vector<LineVert> lines, linesTop;
 
     void bindMesh(VkCommandBuffer c);
-    void drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& texPerSub);
+    // translucent : seulement les parties sans texture d'eau, de fondu ou de verre (à dessiner après le reste) ;
+    // sinon tout sauf elles
+    void drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& texPerSub, bool translucent = false);
     void drawTerrain(VkCommandBuffer c, const PC& pc);
     void drawLines(VkCommandBuffer c, const PC& pc);
 
 private:
     VkBuf lineBuf_[Vk::FRAMES];
     VkPipeline pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs, size_t fsz, uint32_t stride,
-                        const std::vector<VkVertexInputAttributeDescription>& attrs, VkPrimitiveTopology topo, bool depthTest, bool depthWrite, bool cull);
+                        const std::vector<VkVertexInputAttributeDescription>& attrs, VkPrimitiveTopology topo, bool depthTest, bool depthWrite, bool cull,
+                        bool blend = false);
 };
 
 }  // namespace te

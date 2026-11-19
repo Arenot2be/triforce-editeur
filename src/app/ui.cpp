@@ -712,14 +712,15 @@ void dialogs(Editor& ed, bool& quit) {
     }
     modal("Modèles à problème", U.showMdl);
     if (ImGui::BeginPopupModal("Modèles à problème", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        std::string a, b, c, d;
-        int na = 0, nb = 0, nc = 0, nd = 0;
+        std::string a, b, c, d, e;
+        int na = 0, nb = 0, nc = 0, nd = 0, ne = 0;
         for (auto& [n, s] : ed.modelSlots) {
             if (s.st == ModelSlot::Ok) {
                 std::string p = modelProblems(ed, s);
                 if (!p.empty()) { a += n + p; na++; }
-                bool plain = false;
-                for (auto& sb : s.gpu.subs) if (sb.tex.empty()) plain = true;
+                bool plain = false, see = false;
+                for (auto& sb : s.gpu.subs) if (sb.tex.empty()) (sb.kind ? see : plain) = true;
+                if (see) { e += (ne ? ", " : "") + n; ne++; }
                 if (plain && s.notes.empty()) { c += (nc ? ", " : "") + n; nc++; }
             } else if (s.st == ModelSlot::None) {
                 // (acteurs sans modèle par nature : zones, repères, effets…)
@@ -728,7 +729,8 @@ void dialogs(Editor& ed, bool& quit) {
             }
         }
         std::string all = fmt("Modèles chargés en partie sans texture : %d\n", na) + a + fmt("\nModèles illisibles : %d\n", nb) + b +
-                          fmt("\nNormal — parties sans texture de couleur dans leur matériau (eau, verre, fondus…) : %d\n", nc) + c +
+                          fmt("\nNormal — eau, fondus et lumières, verre (affichés transparents) : %d\n", ne) + e +
+                          fmt("\n\nNormal — autres parties sans texture de couleur dans leur matériau (en gris) : %d\n", nc) + c +
                           fmt("\n\nNormal — acteurs sans modèle (zones, repères, effets…) : %d\n", nd) + d + "\n";
         ImGui::InputTextMultiline("##mdl", &all, {900, 440}, ImGuiInputTextFlags_ReadOnly);
         if (ImGui::Button("Tout copier")) {

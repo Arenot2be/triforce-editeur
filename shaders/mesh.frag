@@ -15,5 +15,5 @@ void main() {
     float lit = 0.42 + 0.5 * abs(dot(n, normalize(vec3(0.35, 1.0, 0.25)))) + 0.08 * abs(n.x);
     vec3 col = c.rgb * lit;
     if (pc.pos.w > 0.5) col = mix(col, vec3(1.0, 0.82, 0.3), pc.pos.w > 1.5 ? 0.18 : 0.38);
-    outColor = vec4(col, 1.0);
+    outColor = vec4(col, pc.scale.w > 0.5 ? 1.0 : pc.color.a);   // (parties transparentes : alpha de pc.color)
 }

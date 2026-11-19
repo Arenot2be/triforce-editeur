@@ -351,7 +351,7 @@ const Attr* pickAttr(const std::vector<Attr>& attrs, const std::string& name) {
     return nullptr;
 }
 
-std::vector<std::vector<std::string>> materialTextures(const R& r, size_t mdl) {
+std::vector<std::vector<std::string>> materialTextures(const R& r, size_t mdl, std::vector<std::string>* matNames = nullptr) {
     auto [mo, mats] = findPtr(r, mdl, 0x60, "FMAT");
     std::vector<std::vector<std::string>> out;
     if (!mats) return out;
@@ -365,6 +365,7 @@ std::vector<std::vector<std::string>> materialTextures(const R& r, size_t mdl) {
     };
     for (int i = 0; i < count; i++) {
         size_t m = mats + size_t(i) * stride;
+        if (matNames) matNames->push_back(r.str(m + 0x08));
         std::vector<std::string> names;
         size_t arr = r.ptr(m + 0x20);
         int num = m + 0xA3 < r.n ? r.u8(m + 0xA3) : 0;
@@ -391,6 +392,19 @@ std::vector<std::vector<std::string>> materialTextures(const R& r, size_t mdl) {
     return out;
 }
 }  // namespace
+
+int surfaceKind(const std::string& material, const std::vector<std::string>& textures) {
+    std::string all = lower(material);
+    for (auto& t : textures) all += " " + lower(t);
+    auto has = [&](std::initializer_list<const char*> ws) {
+        for (auto w : ws) if (all.find(w) != std::string::npos) return true;
+        return false;
+    };
+    if (has({"water", "wtr", "river", "waterfall", "wave", "ripple", "lake", "pond", "sea_", "_sea", "puddle", "splash"})) return 1;
+    if (has({"fade", "fog", "glow", "beam", "light", "shaft", "ray_", "_ray", "emissive", "emit", "aura", "haze", "cloud"})) return 2;
+    if (has({"glass", "window", "ice", "crystal"})) return 3;
+    return 0;
+}
 
 std::string albedo(const std::vector<std::string>& names) {
     static const char* NOT[] = {"_nrm", "_spm", "_thc", "_emm", "_mtl", "_rgh", "_ao", "_msk", "_mask", "_hgt", "_ems", "_opa",
@@ -455,7 +469,14 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     std::vector<M34> world;
     std::vector<uint16_t> table;
     if (skel) bones(r, skel, world, table);
-    auto materials = materialTextures(r, mdl);
+    std::vector<std::string> matNames;
+    auto materials = materialTextures(r, mdl, &matNames);
+    // (partie sans texture de couleur : eau, fondu, verre… d'après les noms du matériau et de ses textures)
+    auto subOf = [&](uint32_t start, uint32_t count, int matIdx, const std::string& tex) {
+        Mesh::Sub s{start, count, tex, 0, size_t(matIdx) < matNames.size() ? matNames[size_t(matIdx)] : ""};
+        if (tex.empty()) s.kind = surfaceKind(s.material, size_t(matIdx) < materials.size() ? materials[size_t(matIdx)] : std::vector<std::string>{});
+        return s;
+    };
     size_t vtxArr = r.ptr(mdl + 0x20), vtxStride = 0x60;
     if (vtxArr && r.magic(vtxArr, "FVTX")) {
         for (size_t o = vtxArr + 4; o + 4 <= std::min(data.size(), vtxArr + 0x200); o++)
@@ -497,7 +518,7 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 for (uint32_t v : ids) m.indices.push_back(base + v);
                 int matIdx = r.u16(tail + 2);
                 std::string tex = !uvs.empty() && size_t(matIdx) < materials.size() ? albedo(materials[size_t(matIdx)]) : "";
-                m.subs.push_back({ibase, uint32_t(m.indices.size()) - ibase, tex});
+                m.subs.push_back(subOf(ibase, uint32_t(m.indices.size()) - ibase, matIdx, tex));
                 tris += ids.size() / 3;
                 m.shapes++;
                 m.meshletShapes++;
@@ -582,7 +603,7 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
             }
             for (uint32_t v : ids) m.indices.push_back(base + v + first);
             std::string tex = !uvs.empty() && size_t(matIdx) < materials.size() ? albedo(materials[size_t(matIdx)]) : "";
-            m.subs.push_back({ibase, uint32_t(m.indices.size()) - ibase, tex});
+            m.subs.push_back(subOf(ibase, uint32_t(m.indices.size()) - ibase, matIdx, tex));
             tris += ids.size() / 3;
             m.shapes++;
         } catch (const std::exception& e) {

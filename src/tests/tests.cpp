@@ -41,6 +41,7 @@ int main(int argc, char** argv) {
             Mesh m = bfresRead(f, argc > 3 ? argv[3] : "");
             std::printf("%zu %zu %zu", m.positions.size() / 3, m.indices.size(), m.subs.size());
             for (auto& s : m.subs) std::printf(" [%u %u %s]", s.start, s.count, s.tex.c_str());
+            if (std::getenv("TE_KIND")) for (auto& s : m.subs) std::printf("  matériau %s : genre %d\n", s.material.c_str(), s.kind);
             double sum = 0;
             for (float f : m.positions) sum += f;
             for (float f : m.uvs) sum += f;
