@@ -219,9 +219,14 @@ std::vector<std::array<double, 4>> attrValues(const R& r, const Buf& b, const At
 //   +0  (64 bits) bases entières de x, y, z (21 bits chacune)
 //   +16 octet 2 : triangles, octet 3 : sommets ; +20 : (début des sommets en octets depuis +84) << 4
 //   +24 (64 bits) bits 0-9 : bits par sommet ; 16-20, 21-25, 26-30 : largeurs de x, y, z
-// Chaque sommet commence par x, y, z (entiers non signés ; position = (entier + base) × pas + min) ; les triangles
-// suivent les sommets, 3 index de (bits nécessaires pour « sommets - 1 ») bits chacun. Seul le niveau 0 est lu.
-void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>& pos, std::vector<uint32_t>& idx) {
+//   +32, +40… (si drapeaux 0x1F000) un attribut à 2 composantes par mot de 64 bits : bases (2 × int16), puis
+//        exposants (2 × 12 bits, moins 16) et largeurs (2 × 4 bits, plus 1) ; le premier est la coordonnée de texture 0
+// Chaque sommet : x, y, z (entiers non signés ; position = (entier + base) × pas + min), deux champs (normale et
+// tangente ? de (+20 & 15) × 2 + 12 et ((+28 << 1) & 30) + 13 bits), puis les attributs à 2 composantes
+// ((entier + base) × 2^exposant). Les triangles suivent les sommets : 3 index de (bits nécessaires pour
+// « sommets - 1 ») bits chacun. Seul le niveau de détail 0 est lu.
+void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>& pos, std::vector<uint32_t>& idx,
+                     std::vector<float>& uv) {
     if (hdr + 84 > end || end > d.size()) throw Error("meshlets : en-tête hors du tampon");
     float mn[3] = {rdf(d, hdr), rdf(d, hdr + 4), rdf(d, hdr + 8)}, step = rdf(d, hdr + 12);
     uint32_t flags = rd32(d, hdr + 16);
@@ -236,6 +241,8 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
     uint32_t count = rd32(d, hdr + 20);
     size_t recSize = 8 * size_t(4 + std::popcount(flags & 0xC00u) + std::popcount(flags & 0x1F000u));
     size_t base = hdr + 84;
+    int n2d = (flags & 0xC00u) ? 0 : std::popcount(flags & 0x1F000u);   // (attributs des bits 0xC00 : disposition inconnue)
+    bool uvOk = n2d > 0;
     if (!count || base + recSize * count > end) throw Error("meshlets : descripteurs hors du tampon");
     size_t bits = (end - base) * 8;
     auto rd = [&](size_t bp, unsigned w) -> uint32_t {
@@ -258,13 +265,32 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
         while ((1u << ib) < vc) ib++;
         size_t start = size_t(w5 >> 4) * 8;
         uint32_t first = uint32_t(pos.size() / 3);
+        // coordonnées de texture 0 : seulement si la disposition supposée remplit exactement le sommet
+        unsigned uvAt = ww[0] + ww[1] + ww[2] + (w5 & 15) * 2 + 12 + ((rd32(d, rec + 28) << 1) & 30) + 13, total = uvAt;
+        int bu = 0, bv = 0, eu = 0, ev = 0;
+        unsigned nu = 0, nv = 0;
+        for (int k = 0; k < n2d; k++) {
+            uint32_t b = rd32(d, rec + 32 + 8 * size_t(k)), par = rd32(d, rec + 36 + 8 * size_t(k));
+            unsigned a = ((par >> 24) & 15) + 1, c = (par >> 28) + 1;
+            if (k == 0) {
+                bu = int16_t(b & 0xFFFF); bv = int16_t(b >> 16);
+                eu = int(par & 4095) - 16; ev = int((par >> 12) & 4095) - 16;
+                nu = a; nv = c;
+            }
+            total += a + c;
+        }
+        bool hasUv = uvOk && total == stride;
         for (unsigned i = 0; i < vc; i++) {
             size_t p = start + size_t(i) * stride;
             for (int a = 0; a < 3; a++) {
                 pos.push_back((double(rd(p, ww[a])) + qb[a]) * step + mn[a]);
                 p += ww[a];
             }
+            size_t q = start + size_t(i) * stride + uvAt;
+            uv.push_back(hasUv ? float(std::ldexp(double(int64_t(rd(q, nu)) + bu), eu)) : 0.f);
+            uv.push_back(hasUv ? float(std::ldexp(double(int64_t(rd(q + nu, nv)) + bv), ev)) : 0.f);
         }
+        if (!hasUv) uvOk = false;
         size_t t0 = start + size_t(vc) * stride;
         for (unsigned t = 0; t < pc; t++) {
             size_t p = t0 + size_t(t) * 3 * ib;
@@ -274,6 +300,7 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
         }
     }
     if (idx.empty()) throw Error("meshlets : aucun triangle");
+    if (!uvOk) uv.clear();   // (une seule disposition inconnue : pas de texture pour toute la forme)
 }
 
 void vertexBuffer(const R& r, size_t vb, size_t bufferOffset, std::vector<Attr>& attrs, std::vector<Buf>& bufs, size_t& count) {
@@ -440,7 +467,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 size_t hdr = bufferOffset + (arr ? r.u32(arr) : 0);
                 std::vector<double> pts;
                 std::vector<uint32_t> ids;
-                meshletGeometry(data, hdr, std::min(data.size(), bufferOffset + bufferSize), pts, ids);
+                std::vector<float> uvs;
+                meshletGeometry(data, hdr, std::min(data.size(), bufferOffset + bufferSize), pts, ids, uvs);
                 size_t tail = sh + 0x50;
                 int bone = r.u16(tail + 4), skin = r.u8(tail + 10);
                 const M34* M = skin == 0 && size_t(bone) < world.size() ? &world[size_t(bone)] : nullptr;
@@ -454,10 +482,13 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                         x = nx; y = ny; z = nz;
                     }
                     m.positions.push_back(float(x)); m.positions.push_back(float(y)); m.positions.push_back(float(z));
-                    m.uvs.push_back(0.f); m.uvs.push_back(0.f);
+                    m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2]);
+                    m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2 + 1]);
                 }
                 for (uint32_t v : ids) m.indices.push_back(base + v);
-                m.subs.push_back({ibase, uint32_t(m.indices.size()) - ibase, ""});   // (coordonnées de texture pas encore lues)
+                int matIdx = r.u16(tail + 2);
+                std::string tex = !uvs.empty() && size_t(matIdx) < materials.size() ? albedo(materials[size_t(matIdx)]) : "";
+                m.subs.push_back({ibase, uint32_t(m.indices.size()) - ibase, tex});
                 tris += ids.size() / 3;
                 m.shapes++;
                 m.meshletShapes++;

@@ -51,7 +51,8 @@ décodés avec le code de [dt-12345/MeshCodec](https://github.com/dt-12345/MeshC
 
 Les modèles dont la géométrie est en **meshlets** (environ 12 %, surtout falaises, rochers, clôtures et salles ; le
 jeu les décode sur la carte graphique, dans ses mesh shaders) sont lus aussi : positions et triangles du niveau de
-détail le plus fin. Leurs coordonnées de texture ne sont pas encore lues : ils s'affichent en blanc ombré.
+détail le plus fin, avec leurs coordonnées de texture (pour les variantes du format reconnues ; sinon en blanc
+ombré).
 Pour un modèle illisible, le panneau de sélection propose « Exporter ce modèle pour analyse », qui écrit le modèle
 décompressé dans `Documents\Triforce-modkit\analyse` (pour ton usage : ne le partage pas publiquement).
 
