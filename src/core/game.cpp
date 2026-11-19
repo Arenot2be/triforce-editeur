@@ -4,6 +4,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 namespace te {
 
@@ -78,6 +79,64 @@ std::vector<std::string> Game::findAnywhere(const std::string& name, size_t max)
         if (out.size() >= max) break;
     }
     return out;
+}
+
+namespace {
+std::vector<std::string> tokens(const std::string& s) {
+    std::vector<std::string> t;
+    for (auto& p : split(lower(s), '_')) if (!p.empty()) t.push_back(p);
+    return t;
+}
+int editDist(const std::string& a, const std::string& b) {
+    std::vector<int> d(b.size() + 1);
+    for (size_t j = 0; j <= b.size(); j++) d[j] = int(j);
+    for (size_t i = 1; i <= a.size(); i++) {
+        int prev = d[0];
+        d[0] = int(i);
+        for (size_t j = 1; j <= b.size(); j++) {
+            int cur = d[j];
+            d[j] = std::min({d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] == b[j - 1] ? 0 : 1)});
+            prev = cur;
+        }
+    }
+    return d[b.size()];
+}
+}
+
+std::pair<std::string, std::string> Game::similarTex(const std::string& name) {
+    texFile(name);          // (index des noms rangés ailleurs)
+    findAnywhere(name, 1);  // (liste de tous les fichiers)
+    std::vector<std::pair<std::string, std::string>> cands;   // (nom, fichier)
+    {
+        std::lock_guard<std::mutex> lk(texM_);
+        for (auto& f : all_)
+            if (f.rfind("Tex/", 0) == 0 && endsWith(f, ".bntx.zs")) {
+                std::string stem = f.substr(f.rfind('/') + 1);
+                cands.emplace_back(stem.substr(0, stem.size() - 8), f);
+            }
+        for (auto& [k, v] : texIndex_) cands.emplace_back(k, v);
+    }
+    auto want = tokens(name);
+    if (want.size() < 3) return {};
+    std::string suffix = want.back();   // (alb, nrm… : le même rôle obligatoire)
+    want.pop_back();
+    // (la famille : tous les mots sauf le dernier — ou les deux derniers s'il reste au moins trois mots, ex. A_01)
+    size_t minShared = want.size() >= 4 ? want.size() - 2 : want.size() - 1;
+    if (minShared < 2) return {};
+    std::string lw = lower(name);
+    int bestShared = -1, bestDist = 1 << 30;
+    std::pair<std::string, std::string> best;
+    for (auto& [n, f] : cands) {
+        auto t = tokens(n);
+        if (t.size() < 2 || t.back() != suffix || lower(n) == lw) continue;
+        t.pop_back();
+        size_t sh = 0;
+        while (sh < t.size() && sh < want.size() && t[sh] == want[sh]) sh++;
+        if (sh < minShared) continue;
+        int d = editDist(lower(n), lw);
+        if (int(sh) > bestShared || (int(sh) == bestShared && d < bestDist)) { bestShared = int(sh); bestDist = d; best = {n, f}; }
+    }
+    return best;
 }
 
 // (seules les textures rangées sous un autre nom que le leur sont retenues ; l'en-tête d'un BNTX, avec les noms, est

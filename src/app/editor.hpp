@@ -52,6 +52,7 @@ struct TexSlot {
     enum St { Loading, Ok, None, Mask } st = Loading;
     VkTex tex;
     std::string why, format;
+    std::string standIn;   // (texture absente du jeu remplacée par une voisine de la même famille : son nom)
     int w = 0, h = 0, invalid = 0, empty = 0;
     std::map<std::string, int> reasons;
 };

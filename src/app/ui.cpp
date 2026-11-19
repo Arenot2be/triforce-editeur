@@ -4,6 +4,7 @@
 #include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <set>
 #include <chrono>
 #include <cmath>
 
@@ -75,7 +76,7 @@ std::string texLine(Editor& ed, const std::string& name) {
     switch (t.st) {
         case TexSlot::Loading: return name + " — chargement";
         case TexSlot::Ok: {
-            std::string s = name + " — ok (" + t.format + fmt(", %dx%d)", t.w, t.h);
+            std::string s = name + (t.standIn.empty() ? "" : " — absente du jeu, remplacée par " + t.standIn) + " — ok (" + t.format + fmt(", %dx%d)", t.w, t.h);
             if (t.invalid) {
                 s += fmt(", %d blocs invalides (", t.invalid);
                 bool first = true;
@@ -98,6 +99,18 @@ std::string modelProblems(Editor& ed, const ModelSlot& s) {
         if (sb.tex.empty()) continue;
         auto it = ed.texSlots.find(sb.tex);
         if (it != ed.texSlots.end() && it->second.st == TexSlot::None) out += "\n    texture " + sb.tex + " : " + it->second.why;
+    }
+    return out.empty() ? out : out + "\n";
+}
+// (textures absentes du jeu affichées avec une voisine : une ligne par texture)
+std::string modelStandIns(Editor& ed, const ModelSlot& s) {
+    std::string out;
+    std::set<std::string> seen;
+    for (auto& sb : s.gpu.subs) {
+        if (sb.tex.empty() || !seen.insert(sb.tex).second) continue;
+        auto it = ed.texSlots.find(sb.tex);
+        if (it != ed.texSlots.end() && it->second.st == TexSlot::Ok && !it->second.standIn.empty())
+            out += "\n    " + sb.tex + " (absente du jeu) -> " + it->second.standIn;
     }
     return out.empty() ? out : out + "\n";
 }
@@ -760,12 +773,14 @@ void dialogs(Editor& ed, bool& quit) {
     }
     modal("Modèles à problème", U.showMdl);
     if (ImGui::BeginPopupModal("Modèles à problème", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        std::string a, b, c, d, e;
-        int na = 0, nb = 0, nc = 0, nd = 0, ne = 0;
+        std::string a, b, c, d, e, f;
+        int na = 0, nb = 0, nc = 0, nd = 0, ne = 0, nf = 0;
         for (auto& [n, s] : ed.modelSlots) {
             if (s.st == ModelSlot::Ok) {
                 std::string p = modelProblems(ed, s);
                 if (!p.empty()) { a += n + p; na++; }
+                std::string q = modelStandIns(ed, s);
+                if (!q.empty()) { f += n + q; nf++; }
                 bool plain = false, see = false;
                 for (auto& sb : s.gpu.subs) if (sb.tex.empty()) (sb.kind ? see : plain) = true;
                 if (see) { e += (ne ? ", " : "") + n; ne++; }
@@ -777,6 +792,7 @@ void dialogs(Editor& ed, bool& quit) {
             }
         }
         std::string all = fmt("Modèles chargés en partie sans texture : %d\n", na) + a + fmt("\nModèles illisibles : %d\n", nb) + b +
+                          fmt("\nTextures absentes du jeu, affichées avec une voisine de la même famille (aperçu approché) : %d\n", nf) + f +
                           fmt("\nNormal — eau, fondus et lumières, verre (affichés transparents) : %d\n", ne) + e +
                           fmt("\n\nNormal — autres parties sans texture de couleur dans leur matériau (en gris) : %d\n", nc) + c +
                           fmt("\n\nNormal — acteurs sans modèle (zones, repères, effets…) : %d\n", nd) + d + "\n";

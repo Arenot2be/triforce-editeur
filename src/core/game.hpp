@@ -32,6 +32,9 @@ public:
     std::string texFile(const std::string& name);
     // (fichiers du romfs dont le nom contient `name`, toutes extensions : pour dire où est une texture introuvable)
     std::vector<std::string> findAnywhere(const std::string& name, size_t max = 4);
+    // (texture voisine d'une texture absent du jeu, de la même famille de noms : Insect_C -> Insect_A,
+    //  GraphicVine_A_01 -> GraphicVine_A_00… ; {nom, fichier}, ou {"", ""} si aucune n'est assez proche)
+    std::pair<std::string, std::string> similarTex(const std::string& name);
 
 private:
     void buildTexIndex();

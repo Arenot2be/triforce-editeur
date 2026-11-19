@@ -827,10 +827,15 @@ TexSlot* Editor::texture(const std::string& name) {
     TexSlot& s = texSlots[name];
     Game* g = game.get();
     jobs.add(2, [this, name, g]() -> std::function<void()> {
-        struct R { TexData t; Bytes rgba; std::string why; AstcStats st; int kind = 0; };
+        struct R { TexData t; Bytes rgba; std::string why, standIn; AstcStats st; int kind = 0; };
         auto r = std::make_shared<R>();
         try {
-            std::string rel = g->texFile(name);
+            std::string rel = g->texFile(name), want = name;
+            if (rel.empty()) {
+                // (absente du jeu : une voisine de la même famille, signalée comme remplaçante)
+                auto [sn, sf] = g->similarTex(name);
+                if (!sn.empty()) { rel = sf; want = sn; r->standIn = sn; }
+            }
             if (rel.empty()) {
                 auto found = g->findAnywhere(name);
                 std::string where;
@@ -838,7 +843,7 @@ TexSlot* Editor::texture(const std::string& name) {
                 throw Error("introuvable : ni Tex/" + name + ".bntx.zs, ni dans un autre fichier de Tex/" +
                             (where.empty() ? std::string(" ; aucun fichier du jeu ne porte ce nom") : " ; fichiers à ce nom : " + where));
             }
-            r->t = bntxExtract(g->read(rel), 512, name);
+            r->t = bntxExtract(g->read(rel), 512, want);
             if (r->t.code == 5 || r->t.code == 6) r->kind = 2;   // (BC4, BC5 : masques ou reliefs, pas des couleurs)
             else if (r->t.code == 8) throw Error("format BC6H (HDR) non affiché");
             else if (r->t.code >= 20) {
@@ -858,6 +863,7 @@ TexSlot* Editor::texture(const std::string& name) {
             s2.invalid = r->st.n;
             s2.empty = r->st.empty;
             s2.reasons = r->st.why;
+            s2.standIn = r->standIn;
             if (!r->why.empty()) { s2.st = TexSlot::None; s2.why = r->why; return; }
             if (r->kind == 2) { s2.st = TexSlot::Mask; s2.why = "masque ou relief (" + r->t.format + ")"; return; }
             VkComponentSwizzle swz[4];
