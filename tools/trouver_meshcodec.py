@@ -250,8 +250,8 @@ def lz4_block(src, size):
     return bytes(out)
 
 
-def load_nso(path, src=None):
-    """(le module `main` du dump : segments texte, rodata, data à leur place en mémoire, base 0x80000000)"""
+def load_nso(path, src=None, base=0x80000000):
+    """(un module du dump : segments texte, rodata, data à leur place en mémoire, à `base`)"""
     raw = open(path, "rb").read()
     if raw[:4] != b"NSO0":
         raise SystemExit("%s n'est pas un module NSO" % path)
@@ -272,9 +272,8 @@ def load_nso(path, src=None):
             print("  décompression LZ4 du segment %d (%d Mo)…" % (i, size >> 20))
             d = lz4_block(d, size)
         mem[moff:moff + len(d)] = d[:size]
-    base = 0x80000000
     text = segs[0]
-    return Code(base, bytes(mem), [(base + text[1], base + text[1] + text[2], "main")], {})
+    return Code(base, bytes(mem), [(base + text[1], base + text[1] + text[2], os.path.basename(path))], {})
 
 
 def find_dirs(name, roots, want, depth=4):
@@ -350,13 +349,30 @@ def main():
             import capstone  # noqa: F401
         except ImportError:
             print("ATTENTION : capstone absent de ce Python : le fichier contiendra les instructions brutes (lisibles quand même)")
-        print("Chargement de %s…" % os.path.join(exefs, "main"))
-        code = load_nso(os.path.join(exefs, "main"), src)
-        print("Recherche…")
+        mods = [m for m in ["main"] + ["subsdk%d" % i for i in range(10)] + ["sdk", "rtld"] if os.path.isfile(os.path.join(exefs, m))]
+        print("modules : " + ", ".join(mods))
         with open(dest, "w", encoding="utf-8") as out:
-            out.write("exefs : %s\n\n" % exefs)
-            hits, refs, n = run(code, out)
-        print("%d constantes, %d textes adressés, %d fonctions désassemblées" % (len(hits), len(refs), n))
+            out.write("exefs : %s\nmodules : %s\n" % (exefs, ", ".join(mods)))
+            total = 0
+            base = 0x80000000
+            for m in mods:
+                print("Chargement de %s…" % m)
+                try:
+                    code = load_nso(os.path.join(exefs, m), src, base)
+                except BaseException as e:
+                    out.write("\n######## %s : illisible (%s)\n" % (m, e))
+                    continue
+                base += (len(code.mem) + 0xFFFFF) & ~0xFFFFF
+                # (contrôle : le module est-il bien décompressé ? quelques textes connus)
+                probe = {t: code.mem.count(t) for t in (b"nn::", b".bfres", b"zstd", b"Meshopt", b"meshopt", b"MeshCodec", b"MCPK", b"FMSH")}
+                lo, hi, _ = code.ranges[0]
+                out.write("\n######## %s : %.1f Mo, code %.1f Mo ; textes repères : %s\n" % (
+                    m, len(code.mem) / 1e6, (hi - lo) / 1e6, ", ".join("%s×%d" % (k.decode(), v) for k, v in probe.items())))
+                print("  recherche…")
+                hits, refs, n = run(code, out)
+                total += n
+                print("  %d constantes, %d textes adressés, %d fonctions" % (len(hits), len(refs), n))
+        print("%d fonctions désassemblées en tout" % total)
         print("Écrit dans " + dest)
     except BaseException as e:   # (toujours un fichier, avec l'erreur, pour savoir ce qui a coincé)
         import traceback
