@@ -475,6 +475,13 @@ def main():
                 lo, hi, _ = code.ranges[0]
                 out.write("\n######## %s : %.1f Mo, code %.1f Mo ; textes repères : %s\n" % (
                     m, len(code.mem) / 1e6, (hi - lo) / 1e6, ", ".join("%s×%d" % (k.decode(), v) for k, v in probe.items())))
+                # (noms de fonctions importées/exportées et textes liés à la décompression ou aux maillages)
+                import re
+                keys = re.compile(rb"[ -~]{0,120}(?:ompress|Codec|codec|Meshlet|meshlet|Mesh|Lz4|lz4|LZ4|Zstd|zstd|Deflate|deflate|hwcomp|Fde|Gdef|Inflate|Decode|Unpack)[ -~]{0,120}")
+                found = sorted(set(m.group(0).decode("ascii", "replace") for m in keys.finditer(code.mem)))
+                out.write("== noms et textes liés (décompression, maillages) : %d\n" % len(found))
+                for f in found[:600]:
+                    out.write("  " + f + "\n")
                 print("  recherche…")
                 hits, refs, n = run(code, out)
                 total += n
