@@ -46,6 +46,7 @@ struct ModelSlot {
     enum St { Loading, Ok, None } st = Loading;
     GpuMesh gpu;
     std::string why;
+    std::vector<std::string> notes;   // (formes ignorées ou lues incomplètement)
 };
 struct TexSlot {
     enum St { Loading, Ok, None, Mask } st = Loading;

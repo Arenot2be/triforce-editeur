@@ -267,6 +267,16 @@ void rightPanel(Editor& ed) {
                 }
                 if (first) s += "aucune";
                 ImGui::TextDisabled("%s", s.c_str());
+                for (auto& nt : ms->notes) ImGui::TextColored({0.95f, 0.75f, 0.35f, 1}, "%s", nt.c_str());
+                if (ImGui::SmallButton("Exporter ce modèle pour analyse")) ed.exportModel(n);
+                if (!ms->notes.empty()) {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Copier les remarques")) {
+                        std::string all = n;
+                        for (auto& nt : ms->notes) all += "\n  " + nt;
+                        ImGui::SetClipboardText(all.c_str());
+                    }
+                }
             } else if (ms->st == ModelSlot::None) {
                 ImGui::TextDisabled("Pas de modèle : %s", ms->why.c_str());
                 // (pour tout modèle illisible, pas seulement les meshlets : la raison affichée suffit à trier ensuite)

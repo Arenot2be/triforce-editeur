@@ -226,7 +226,7 @@ std::vector<std::array<double, 4>> attrValues(const R& r, const Buf& b, const At
 // ((entier + base) × 2^exposant). Les triangles suivent les sommets : 3 index de (bits nécessaires pour
 // « sommets - 1 ») bits chacun. Seul le niveau de détail 0 est lu.
 void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>& pos, std::vector<uint32_t>& idx,
-                     std::vector<float>& uv) {
+                     std::vector<float>& uv, std::string& uvWhy) {
     if (hdr + 84 > end || end > d.size()) throw Error("meshlets : en-tête hors du tampon");
     float mn[3] = {rdf(d, hdr), rdf(d, hdr + 4), rdf(d, hdr + 8)}, step = rdf(d, hdr + 12);
     uint32_t flags = rd32(d, hdr + 16);
@@ -243,6 +243,7 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
     size_t base = hdr + 84;
     int n2d = (flags & 0xC00u) ? 0 : std::popcount(flags & 0x1F000u);   // (attributs des bits 0xC00 : disposition inconnue)
     bool uvOk = n2d > 0;
+    if (!uvOk) uvWhy = (flags & 0xC00u) ? fmt("disposition des sommets inconnue (drapeaux %#x)", flags) : fmt("pas de coordonnées de texture (drapeaux %#x)", flags);
     if (!count || base + recSize * count > end) throw Error("meshlets : descripteurs hors du tampon");
     size_t bits = (end - base) * 8;
     auto rd = [&](size_t bp, unsigned w) -> uint32_t {
@@ -290,7 +291,10 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
             uv.push_back(hasUv ? float(std::ldexp(double(int64_t(rd(q, nu)) + bu), eu)) : 0.f);
             uv.push_back(hasUv ? float(std::ldexp(double(int64_t(rd(q + nu, nv)) + bv), ev)) : 0.f);
         }
-        if (!hasUv) uvOk = false;
+        if (!hasUv && uvOk) {
+            uvOk = false;
+            uvWhy = fmt("disposition des sommets inconnue (drapeaux %#x, meshlet %u : %u bits par sommet, %u attendus)", flags, m, stride, total);
+        }
         size_t t0 = start + size_t(vc) * stride;
         for (unsigned t = 0; t < pc; t++) {
             size_t p = t0 + size_t(t) * 3 * ib;
@@ -468,7 +472,9 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 std::vector<double> pts;
                 std::vector<uint32_t> ids;
                 std::vector<float> uvs;
-                meshletGeometry(data, hdr, std::min(data.size(), bufferOffset + bufferSize), pts, ids, uvs);
+                std::string uvWhy;
+                meshletGeometry(data, hdr, std::min(data.size(), bufferOffset + bufferSize), pts, ids, uvs, uvWhy);
+                if (uvs.empty()) m.notes.push_back(fmt("forme %d (meshlets) sans texture : ", si) + uvWhy);
                 size_t tail = sh + 0x50;
                 int bone = r.u16(tail + 4), skin = r.u8(tail + 10);
                 const M34* M = skin == 0 && size_t(bone) < world.size() ? &world[size_t(bone)] : nullptr;

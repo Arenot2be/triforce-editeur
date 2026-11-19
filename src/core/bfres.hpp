@@ -16,7 +16,8 @@ struct Mesh {
     std::string name;
     std::vector<std::string> skipped;
     int shapes = 0;
-    int meshletShapes = 0;   // (dont en meshlets : sans coordonnées de texture)
+    int meshletShapes = 0;
+    std::vector<std::string> notes;   // (formes lues incomplètement : sans coordonnées de texture…)   // (dont en meshlets : sans coordonnées de texture)
 };
 
 extern const char* const MESHLETS;       // (raison des formes en meshlets)

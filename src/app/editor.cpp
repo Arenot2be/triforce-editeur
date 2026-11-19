@@ -603,6 +603,9 @@ void Editor::render(VkCommandBuffer c) {
                 const GpuMesh* g = &rend.cube;
                 const float* bb = rend.cube.bbox;
                 if (ms && ms->st == ModelSlot::Ok) {
+                    // (parties sans texture d'un vrai modèle : gris clair, à peine teinté par la catégorie ; la couleur
+                    // franche reste aux boîtes)
+                    for (int k = 0; k < 3; k++) pc.color[k] = 0.72f + 0.2f * (cc[k] - 0.72f);
                     g = &ms->gpu;
                     bb = g->bbox;
                     sets.assign(g->subs.size(), VK_NULL_HANDLE);
@@ -767,6 +770,8 @@ ModelSlot* Editor::model(const std::string& actor) {
             try {
                 it2->second.gpu = rend.upload(*mesh);
                 it2->second.st = ModelSlot::Ok;
+                it2->second.notes = mesh->notes;
+                for (auto& s : mesh->skipped) it2->second.notes.push_back("ignorée : " + s);
             } catch (const std::exception& e) {
                 it2->second.st = ModelSlot::None;
                 it2->second.why = e.what();
@@ -788,7 +793,20 @@ void Editor::exportModel(const std::string& actor) {
         std::error_code ec;
         fs::create_directories(dir, ec);
         writeFileAtomic(dir / u8path(name), data);
-        say("Modèle décompressé écrit dans Documents\\Triforce-modkit\\analyse\\" + name);
+        // (et ses textures, décompressées, pour vérifier les coordonnées de texture)
+        int nt = 0;
+        auto it = modelSlots.find(actor);
+        if (it != modelSlots.end())
+            for (auto& sb : it->second.gpu.subs) {
+                if (sb.tex.empty()) continue;
+                std::string t = game->texFile(sb.tex);
+                if (t.empty()) continue;
+                try {
+                    writeFileAtomic(dir / u8path(sb.tex + ".bntx"), game->read(t));
+                    nt++;
+                } catch (...) {}
+            }
+        say("Modèle décompressé écrit dans Documents\\Triforce-modkit\\analyse\\" + name + (nt ? fmt(" (et %d texture(s))", nt) : ""));
     } catch (const std::exception& e) {
         say(std::string("Export impossible : ") + e.what(), true);
     }
