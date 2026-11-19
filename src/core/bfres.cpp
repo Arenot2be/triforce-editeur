@@ -403,7 +403,7 @@ std::string albedo(const std::vector<std::string>& names) {
     for (auto& n : names) {
         if (n.empty()) continue;
         std::string l = lower(n);
-        bool bad = endsWith(l, "cmb") || endsWith(l, "_fx") || endsWith(l, "mask");
+        bool bad = endsWith(l, "cmb") || endsWith(l, "_fx") || endsWith(l, "mask") || l.rfind("cmntex_bake", 0) == 0;   // (éclairage précalculé)
         for (auto k : NOT) if (endsWith(l, k) || l.find(std::string(k) + "_") != std::string::npos) bad = true;
         if (!bad) return n;
     }

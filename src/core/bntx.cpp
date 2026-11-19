@@ -8,6 +8,16 @@ namespace te {
 
 const int ASTC_DIMS[14][2] = {{4, 4}, {5, 4}, {5, 5}, {6, 5}, {6, 6}, {8, 5}, {8, 6}, {8, 8}, {10, 5}, {10, 6}, {10, 8}, {10, 10}, {12, 10}, {12, 12}};
 
+// Textures du jeu (rangement de la Switch 2) : dans un GOB de 64 octets sur 8 lignes, les morceaux de 16 octets × 2
+// lignes vont dans l'ordre (x/16 %2, y/2 %2, y/4 %2, x/32 %2), et non (x/16 %2, y/2 %4, x/32 %2) comme pour la Switch 1
+// (blockLinear, gardé pour le terrain) ; vu sur les blocs vides des bords des textures de taille non multiple du bloc
+// ASTC, qui tombent alors tous hors de l'image, et sur la netteté des textures.
+size_t texBlockLinear(size_t x, size_t y, size_t wg, size_t bh) {
+    size_t gh = 8 * bh;
+    return (y / gh) * 512 * bh * wg + (x / 64) * 512 * bh + ((y % gh) / 8) * 512 + ((x % 64) / 32) * 256 + ((y % 8) / 4) * 128 +
+           ((x % 32) / 16) * 64 + ((y % 4) / 2) * 32 + (y % 2) * 16 + (x % 16);
+}
+
 size_t blockLinear(size_t x, size_t y, size_t wg, size_t bh) {
     size_t gh = 8 * bh;
     return (y / gh) * 512 * bh * wg + (x / 64) * 512 * bh + ((y % gh) / 8) * 512 + ((x % 64) / 32) * 256 + ((y % 8) / 2) * 64 +
@@ -118,7 +128,7 @@ Bytes deswizzle(const Bytes& d, size_t start, size_t wb, size_t hb, size_t bpb, 
     Bytes out(wb * hb * bpb);
     for (size_t y = 0; y < hb; y++)
         for (size_t x = 0; x < wb; x++) {
-            size_t o = start + blockLinear(x * bpb, y, wg, gobBh);
+            size_t o = start + texBlockLinear(x * bpb, y, wg, gobBh);
             std::memcpy(out.data() + (y * wb + x) * bpb, d.data() + o, bpb);
         }
     return out;
