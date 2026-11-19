@@ -15,7 +15,7 @@ import struct
 import sys
 
 TARGETS = {"MCPK": 0x4B50434D, "FMSH": 0x48534D46}
-TEXTS = [b"MeshCodec", b"Meshoptimizer", b"MCPK", b"FMSH"]
+TEXTS = [b"MeshCodec", b"Meshoptimizer", b"MCPK", b"FMSH", b"bfres", b"Inflate", b"nflate", b"Decompress", b"LZ4", b"hwcomp", b"GDeflate", b"Gdeflate"]
 # (tables fixes du décodeur MeshCodec, d'après sa réimplémentation libre : leurs octets dans le programme)
 PATTERNS = {
     "table des groupes de sommets (MeshCodec)": struct.pack("<14I", 1, 0, 1, 2, 1, 4, 1, 6, 2, 8, 2, 0xC, 3, 0x10),
@@ -24,7 +24,7 @@ PATTERNS = {
     "table ML_base (zstd)": struct.pack("<16I", *range(3, 19)),
 }
 CALLER_DEPTH = 4
-MAX_FUNCS = 140         # (fonctions désassemblées au plus)
+MAX_FUNCS = 220         # (fonctions désassemblées au plus)
 MAX_FUNC_BYTES = 0x6000  # (taille d'une fonction au plus)
 DEPTH = 3
 
@@ -95,7 +95,7 @@ def find_text_refs(code):
     found = []
     for t in TEXTS:
         at = code.mem.find(t)
-        while at >= 0 and len(found) < 40:
+        while at >= 0 and len(found) < 120:
             s = at
             while s > 0 and 32 <= code.mem[s - 1] < 127:
                 s -= 1
@@ -298,7 +298,7 @@ def run(code, out):
                     nxt.add(f)
                     up.append((f, -(d + 1)))
         level = nxt
-    queue = up[::-1] + [(func_start(code, pc), 0) for pc in list(marks)]
+    queue = [(func_start(code, pc), 0) for pc in list(marks)] + up
     seen = set()
     n = 0
     while queue and n < MAX_FUNCS:
@@ -477,10 +477,12 @@ def main():
                     m, len(code.mem) / 1e6, (hi - lo) / 1e6, ", ".join("%s×%d" % (k.decode(), v) for k, v in probe.items())))
                 # (noms de fonctions importées/exportées et textes liés à la décompression ou aux maillages)
                 import re
-                keys = re.compile(rb"[ -~]{0,120}(?:ompress|Codec|codec|Meshlet|meshlet|Mesh|Lz4|lz4|LZ4|Zstd|zstd|Deflate|deflate|hwcomp|Fde|Gdef|Inflate|Decode|Unpack)[ -~]{0,120}")
+                keys = re.compile(rb"[ -~]{0,120}(?:ompress|nflate|eflate|Lz4|lz4|LZ4|Zstd|zstd|ZSTD|bfres|\.mc\b|meshlet|Meshlet|hwcomp|Fde|FDE|Gdef|GDef)[ -~]{0,120}")
                 found = sorted(set(m.group(0).decode("ascii", "replace") for m in keys.finditer(code.mem)))
                 out.write("== noms et textes liés (décompression, maillages) : %d\n" % len(found))
-                for f in found[:600]:
+                skip = ("hkai", "Havok", "hcl", "grpc", "NavMesh", "_ZN2nn5audio", "Compressor", "CompressibleLink", "hka")
+                found = [f for f in found if not any(k in f for k in skip)]
+                for f in found[:1500]:
                     out.write("  " + f + "\n")
                 print("  recherche…")
                 hits, refs, n = run(code, out)
