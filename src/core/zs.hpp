@@ -1,5 +1,6 @@
 // Compression zstd du jeu : ses dictionnaires (Pack/ZsDic.pack.zs), choisis par l'identifiant que porte chaque fichier.
 #pragma once
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -18,7 +19,8 @@ public:
 
     static bool isZstd(const Bytes& b) { return b.size() >= 4 && b[0] == 0x28 && b[1] == 0xB5 && b[2] == 0x2F && b[3] == 0xFD; }
     static uint32_t dictId(const Bytes& raw);
-    Bytes unpack(const Bytes& raw) const;               // (sans compression : rendu tel quel)
+    // (sans compression : rendu tel quel ; limit : s'arrêter après environ autant d'octets, données tronquées acceptées)
+    Bytes unpack(const Bytes& raw, size_t limit = SIZE_MAX) const;
     static Bytes unpackPlain(const uint8_t* p, size_t n); // (sans dictionnaire)
     Bytes pack(const Bytes& data, uint32_t dictId, int level = 10) const;
     uint32_t dictForName(const std::string& name) const;

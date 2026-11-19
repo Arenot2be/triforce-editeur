@@ -45,7 +45,7 @@ uint32_t Zs::dictId(const Bytes& raw) {
     return ZSTD_getDictID_fromFrame(raw.data(), raw.size());
 }
 
-static Bytes stream(ZSTD_DCtx* dc, const uint8_t* p, size_t n) {
+static Bytes stream(ZSTD_DCtx* dc, const uint8_t* p, size_t n, size_t limit = SIZE_MAX) {
     Bytes out;
     unsigned long long known = ZSTD_getFrameContentSize(p, n);
     if (known != ZSTD_CONTENTSIZE_UNKNOWN && known != ZSTD_CONTENTSIZE_ERROR && known < (1ull << 31)) out.reserve(size_t(known));
@@ -56,6 +56,7 @@ static Bytes stream(ZSTD_DCtx* dc, const uint8_t* p, size_t n) {
         size_t r = ZSTD_decompressStream(dc, &o, &in);
         if (ZSTD_isError(r)) throw Error(std::string("zstd : ") + ZSTD_getErrorName(r));
         out.insert(out.end(), buf.data(), buf.data() + o.pos);
+        if (out.size() >= limit) break;
         if (r == 0) {   // (fin d'une trame : d'autres peuvent suivre)
             if (in.pos >= in.size) break;
             continue;
@@ -78,7 +79,7 @@ Bytes Zs::unpackPlain(const uint8_t* p, size_t n) {
     }
 }
 
-Bytes Zs::unpack(const Bytes& raw) const {
+Bytes Zs::unpack(const Bytes& raw, size_t limit) const {
     if (!isZstd(raw)) return raw;
     uint32_t id = dictId(raw);
     ZSTD_DCtx* dc = ZSTD_createDCtx();
@@ -89,7 +90,7 @@ Bytes Zs::unpack(const Bytes& raw) const {
         ZSTD_DCtx_refDDict(dc, it->second->d);
     }
     try {
-        Bytes out = stream(dc, raw.data(), raw.size());
+        Bytes out = stream(dc, raw.data(), raw.size(), limit);
         ZSTD_freeDCtx(dc);
         return out;
     } catch (...) {

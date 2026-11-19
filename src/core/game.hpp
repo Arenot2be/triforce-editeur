@@ -27,9 +27,15 @@ public:
     Bytes read(const std::string& rel) const;    // (décompressé)
     std::shared_ptr<const Sarc> pack(const std::string& rel);   // (gardé en mémoire)
     void forget(const std::string& rel);
+    // Le fichier Tex/… qui contient la texture `name` : Tex/<name>.bntx.zs, sinon un autre fichier de Tex/ qui la
+    // contient aussi (index construit à la première absence, gardé dans Documents\Triforce-modkit\cache). "" si aucun.
+    std::string texFile(const std::string& name);
 
 private:
-    std::mutex m_;
+    void buildTexIndex();
+    std::mutex m_, texM_;
+    bool texIndexed_ = false;
+    std::map<std::string, std::string> texIndex_;   // (nom en minuscules -> chemin)
     std::map<std::string, std::shared_ptr<const Sarc>> packs_;
 };
 

@@ -18,6 +18,7 @@ struct TexData {
 };
 
 TexData bntxExtract(const Bytes& data, int maxSize = 512, const std::string& want = "");
+std::vector<std::string> bntxNames(const Bytes& data);   // (noms des textures ; "" si hors des données)
 std::string bntxDiagnose(const Bytes& data, const std::string& want = "");
 
 size_t blockLinear(size_t xBytes, size_t y, size_t wgobs, size_t bh);   // (adresse dans le rangement de la Switch)

@@ -1,5 +1,9 @@
 #include "core/game.hpp"
 #include "core/meshcodec.hpp"
+#include "core/bntx.hpp"
+
+#include <fstream>
+#include <sstream>
 
 namespace te {
 
@@ -41,6 +45,72 @@ Bytes Game::read(const std::string& rel) const {
     Bytes r = raw(rel);
     if (isMeshCodec(r)) return meshCodecUnpack(r);   // (.bfres.mc)
     return zs.unpack(r);
+}
+
+std::string Game::texFile(const std::string& name) {
+    std::string rel = "Tex/" + name + ".bntx.zs";
+    if (exists(rel)) return rel;
+    std::lock_guard<std::mutex> lk(texM_);
+    if (!texIndexed_) {
+        texIndexed_ = true;
+        try { buildTexIndex(); } catch (...) {}
+    }
+    auto it = texIndex_.find(lower(name));
+    return it == texIndex_.end() ? "" : it->second;
+}
+
+// (seules les textures rangées sous un autre nom que le leur sont retenues ; l'en-tête d'un BNTX, avec les noms, est
+// au début du fichier : on n'en décompresse que le début, et tout le fichier seulement si un nom est plus loin)
+void Game::buildTexIndex() {
+    std::error_code ec;
+    fs::path dir = romfs / "Tex";
+    std::vector<std::pair<std::string, uintmax_t>> files;
+    uintmax_t total = 0;
+    for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        std::string rel = pathStr(fs::relative(it->path(), romfs, ec));
+        for (auto& c : rel) if (c == '\\') c = '/';
+        if (!endsWith(rel, ".bntx.zs")) continue;
+        uintmax_t sz = it->file_size(ec);
+        files.emplace_back(rel, sz);
+        total += sz;
+    }
+    std::sort(files.begin(), files.end());
+    std::string key = fmt("v1 %zu %llu ", files.size(), (unsigned long long)total) + pathStr(romfs);
+    fs::path cache = homeDir() / u8path("Documents") / u8path("Triforce-modkit") / u8path("cache") / u8path("index-textures.txt");
+    {
+        std::ifstream f(cache, std::ios::binary);
+        std::string line;
+        if (f && std::getline(f, line) && line == key) {
+            while (std::getline(f, line)) {
+                auto t = line.find('\t');
+                if (t != std::string::npos) texIndex_[line.substr(0, t)] = line.substr(t + 1);
+            }
+            return;
+        }
+    }
+    for (auto& [rel, sz] : files) {
+        try {
+            std::string stem = rel.substr(rel.rfind('/') + 1);
+            stem = lower(stem.substr(0, stem.size() - 8));
+            Bytes head = zs.unpack(readFileHead(path(rel), 16384), 65536);
+            auto names = bntxNames(head);
+            bool cut = names.empty();
+            for (auto& n : names) if (n.empty()) cut = true;
+            if (cut) names = bntxNames(read(rel));
+            for (auto& n : names) {
+                std::string k = lower(n);
+                if (!k.empty() && k != stem && !texIndex_.count(k)) texIndex_[k] = rel;
+            }
+        } catch (...) {
+        }
+    }
+    std::ostringstream o;
+    o << key << "\n";
+    for (auto& [k, v] : texIndex_) o << k << "\t" << v << "\n";
+    fs::create_directories(cache.parent_path(), ec);
+    std::string txt = o.str();
+    try { writeFileAtomic(cache, Bytes(txt.begin(), txt.end())); } catch (...) {}
 }
 
 std::shared_ptr<const Sarc> Game::pack(const std::string& rel) {

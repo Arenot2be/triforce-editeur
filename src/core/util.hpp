@@ -61,6 +61,7 @@ struct Writer {
 fs::path u8path(std::string_view s);
 std::string pathStr(const fs::path& p);
 Bytes readFile(const fs::path& p);
+Bytes readFileHead(const fs::path& p, size_t n);   // (les n premiers octets au plus)
 std::string readText(const fs::path& p);
 void writeFileAtomic(const fs::path& p, const void* data, size_t n);   // (dossiers créés ; écrit puis renomme)
 inline void writeFileAtomic(const fs::path& p, const Bytes& b) { writeFileAtomic(p, b.data(), b.size()); }

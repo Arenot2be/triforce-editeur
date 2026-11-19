@@ -804,8 +804,8 @@ TexSlot* Editor::texture(const std::string& name) {
         struct R { TexData t; Bytes rgba; std::string why; AstcStats st; int kind = 0; };
         auto r = std::make_shared<R>();
         try {
-            std::string rel = "Tex/" + name + ".bntx.zs";
-            if (!g->exists(rel)) throw Error("fichier " + rel + " introuvable");
+            std::string rel = g->texFile(name);
+            if (rel.empty()) throw Error("introuvable : ni Tex/" + name + ".bntx.zs, ni dans un autre fichier de Tex/");
             r->t = bntxExtract(g->read(rel), 512, name);
             if (r->t.code == 5 || r->t.code == 6) r->kind = 2;   // (BC4, BC5 : masques ou reliefs, pas des couleurs)
             else if (r->t.code == 8) throw Error("format BC6H (HDR) non affiché");

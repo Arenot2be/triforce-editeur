@@ -36,6 +36,15 @@ Bytes readFile(const fs::path& p) {
     return b;
 }
 
+Bytes readFileHead(const fs::path& p, size_t n) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f) throw Error("impossible d'ouvrir " + pathStr(p));
+    Bytes b(n);
+    f.read(reinterpret_cast<char*>(b.data()), static_cast<std::streamsize>(n));
+    b.resize(static_cast<size_t>(f.gcount()));
+    return b;
+}
+
 std::string readText(const fs::path& p) {
     Bytes b = readFile(p);
     std::string s(b.begin(), b.end());

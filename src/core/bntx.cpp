@@ -153,6 +153,13 @@ TexData bntxExtract(const Bytes& d, int maxSize, const std::string& want) {
     return r;
 }
 
+std::vector<std::string> bntxNames(const Bytes& data) {
+    std::vector<std::string> out;
+    if (!has(data, 0, "BNTX")) return out;
+    for (auto& [p, nm] : textures(data)) out.push_back(nm);
+    return out;
+}
+
 std::string bntxDiagnose(const Bytes& d, const std::string& want) {
     auto lst = textures(d);
     Info t = info(d, want);
