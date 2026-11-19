@@ -823,7 +823,13 @@ TexSlot* Editor::texture(const std::string& name) {
         auto r = std::make_shared<R>();
         try {
             std::string rel = g->texFile(name);
-            if (rel.empty()) throw Error("introuvable : ni Tex/" + name + ".bntx.zs, ni dans un autre fichier de Tex/");
+            if (rel.empty()) {
+                auto found = g->findAnywhere(name);
+                std::string where;
+                for (auto& f : found) where += (where.empty() ? "" : ", ") + f;
+                throw Error("introuvable : ni Tex/" + name + ".bntx.zs, ni dans un autre fichier de Tex/" +
+                            (where.empty() ? std::string(" ; aucun fichier du jeu ne porte ce nom") : " ; fichiers à ce nom : " + where));
+            }
             r->t = bntxExtract(g->read(rel), 512, name);
             if (r->t.code == 5 || r->t.code == 6) r->kind = 2;   // (BC4, BC5 : masques ou reliefs, pas des couleurs)
             else if (r->t.code == 8) throw Error("format BC6H (HDR) non affiché");

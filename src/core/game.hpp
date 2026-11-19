@@ -30,12 +30,16 @@ public:
     // Le fichier Tex/… qui contient la texture `name` : Tex/<name>.bntx.zs, sinon un autre fichier de Tex/ qui la
     // contient aussi (index construit à la première absence, gardé dans Documents\Triforce-modkit\cache). "" si aucun.
     std::string texFile(const std::string& name);
+    // (fichiers du romfs dont le nom contient `name`, toutes extensions : pour dire où est une texture introuvable)
+    std::vector<std::string> findAnywhere(const std::string& name, size_t max = 4);
 
 private:
     void buildTexIndex();
     std::mutex m_, texM_;
     bool texIndexed_ = false;
     std::map<std::string, std::string> texIndex_;   // (nom en minuscules -> chemin)
+    bool allListed_ = false;
+    std::vector<std::string> all_;   // (tous les fichiers du romfs, chemins relatifs)
     std::map<std::string, std::shared_ptr<const Sarc>> packs_;
 };
 

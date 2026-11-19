@@ -59,6 +59,27 @@ std::string Game::texFile(const std::string& name) {
     return it == texIndex_.end() ? "" : it->second;
 }
 
+std::vector<std::string> Game::findAnywhere(const std::string& name, size_t max) {
+    std::lock_guard<std::mutex> lk(texM_);
+    if (!allListed_) {
+        allListed_ = true;
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(romfs, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            std::string rel = pathStr(fs::relative(it->path(), romfs, ec));
+            for (auto& c : rel) if (c == '\\') c = '/';
+            all_.push_back(rel);
+        }
+    }
+    std::vector<std::string> out;
+    std::string k = lower(name);
+    for (auto& f : all_) {
+        if (lower(f.substr(f.rfind('/') + 1)).find(k) != std::string::npos) out.push_back(f);
+        if (out.size() >= max) break;
+    }
+    return out;
+}
+
 // (seules les textures rangées sous un autre nom que le leur sont retenues ; l'en-tête d'un BNTX, avec les noms, est
 // au début du fichier : on n'en décompresse que le début, et tout le fichier seulement si un nom est plus loin)
 void Game::buildTexIndex() {

@@ -120,7 +120,12 @@ std::string ModelIndex::path(const std::string& fmdb, const std::string& proj) {
 std::string ModelIndex::file(const std::string& actor) {
     if (actor.empty() || actor.find_first_of("\\/:*?\"<>|") != std::string::npos) throw Error("nom d'acteur invalide");
     auto inf = info(actor);
-    if (!inf) throw Error("pas de ModelInfo pour " + actor);
+    if (!inf) {
+        // (sans ModelInfo : un modèle de Model/ qui porte le nom de l'acteur, s'il y en a un)
+        std::string rel = path(actor, "");
+        if (!rel.empty()) return rel;
+        throw Error("pas de ModelInfo pour " + actor + " (pas de modèle à son nom dans Model/ non plus)");
+    }
     std::string rel = path(inf->first, inf->second);
     if (rel.empty()) throw Error("modèle " + inf->second + "." + inf->first + " introuvable dans Model/");
     return rel;
@@ -130,7 +135,7 @@ Mesh ModelIndex::load(const std::string& actor) {
     std::string rel = file(actor);
     auto inf = info(actor);
     try {
-        return bfresRead(game_.read(rel), inf->first);
+        return bfresRead(game_.read(rel), inf ? inf->first : actor);
     } catch (const std::exception& e) {
         throw Error(std::string("modèle illisible : ") + e.what());
     }

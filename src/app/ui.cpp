@@ -66,13 +66,11 @@ std::string texLine(Editor& ed, const std::string& name) {
 std::string modelProblems(Editor& ed, const ModelSlot& s) {
     std::string out;
     for (auto& nt : s.notes) out += "\n    " + nt;
-    bool untextured = false;
     for (auto& sb : s.gpu.subs) {
-        if (sb.tex.empty()) { untextured = true; continue; }
+        if (sb.tex.empty()) continue;
         auto it = ed.texSlots.find(sb.tex);
         if (it != ed.texSlots.end() && it->second.st == TexSlot::None) out += "\n    texture " + sb.tex + " : " + it->second.why;
     }
-    if (untextured && s.notes.empty()) out += "\n    partie sans texture dans le matériau";
     return out.empty() ? out : out + "\n";
 }
 
@@ -573,7 +571,7 @@ void viewport(Editor& ed) {
         for (auto& [k, s] : ed.modelSlots)
             if (s.st == ModelSlot::Ok && !modelProblems(ed, s).empty()) partial++;
         ImGui::SameLine(0, 4);
-        if ((partial || none) && ImGui::SmallButton(fmt("%d sans texture", partial).c_str())) U.showMdl = true;
+        if ((partial || none) && ImGui::SmallButton(partial ? fmt("%d à problème", partial).c_str() : "détails")) U.showMdl = true;
     }
     ImGui::SameLine();
     ImGui::Checkbox("Textures", &ed.showTextures);
@@ -705,18 +703,24 @@ void dialogs(Editor& ed, bool& quit) {
     }
     modal("Modèles à problème", U.showMdl);
     if (ImGui::BeginPopupModal("Modèles à problème", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        std::string a, b;
-        int na = 0, nb = 0;
+        std::string a, b, c, d;
+        int na = 0, nb = 0, nc = 0, nd = 0;
         for (auto& [n, s] : ed.modelSlots) {
             if (s.st == ModelSlot::Ok) {
                 std::string p = modelProblems(ed, s);
                 if (!p.empty()) { a += n + p; na++; }
+                bool plain = false;
+                for (auto& sb : s.gpu.subs) if (sb.tex.empty()) plain = true;
+                if (plain && s.notes.empty()) { c += (nc ? ", " : "") + n; nc++; }
             } else if (s.st == ModelSlot::None) {
-                b += n + " : " + s.why + "\n";
-                nb++;
+                // (acteurs sans modèle par nature : zones, repères, effets…)
+                if (s.why.rfind("pas de ModelInfo", 0) == 0) { d += (nd ? ", " : "") + n; nd++; }
+                else { b += n + " : " + s.why + "\n"; nb++; }
             }
         }
-        std::string all = fmt("Modèles chargés en partie sans texture : %d\n", na) + a + fmt("\nSans modèle : %d\n", nb) + b;
+        std::string all = fmt("Modèles chargés en partie sans texture : %d\n", na) + a + fmt("\nModèles illisibles : %d\n", nb) + b +
+                          fmt("\nNormal — parties sans texture de couleur dans leur matériau (eau, verre, fondus…) : %d\n", nc) + c +
+                          fmt("\n\nNormal — acteurs sans modèle (zones, repères, effets…) : %d\n", nd) + d + "\n";
         ImGui::InputTextMultiline("##mdl", &all, {900, 440}, ImGuiInputTextFlags_ReadOnly);
         if (ImGui::Button("Tout copier")) {
             ImGui::SetClipboardText(all.c_str());
