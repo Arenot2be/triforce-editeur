@@ -75,7 +75,8 @@ std::vector<std::pair<size_t, std::string>> textures(const Bytes& d) {
 struct Info {
     std::string name;
     uint32_t format = 0;
-    int w = 0, h = 0, mips = 0, tileMode = 0, bhLog2 = 0;
+    int w = 0, h = 0, mips = 0, tileMode = 0, bhLog2 = 0, layers = 1;
+    size_t imageSize = 0;
     std::vector<size_t> mipOffsets;
     uint32_t compSel = 0x05040302;
 };
@@ -97,6 +98,9 @@ Info info(const Bytes& d, const std::string& want) {
     t.w = int32_t(rd32(d, brti + 0x24));
     t.h = int32_t(rd32(d, brti + 0x28));
     t.bhLog2 = int32_t(rd32(d, brti + 0x34)) & 7;
+    t.layers = std::max(1, int(rd32(d, brti + 0x30)));
+    if (t.layers > 2048) t.layers = 1;
+    t.imageSize = rd32(d, brti + 0x50);
     uint32_t cs = rd32(d, brti + 0x58);
     bool ok = cs != 0;
     for (int k = 0; k < 4; k++) if (((cs >> (8 * k)) & 0xFF) > 5) ok = false;
@@ -135,8 +139,12 @@ Bytes deswizzle(const Bytes& d, size_t start, size_t wb, size_t hb, size_t bpb, 
 }
 }  // namespace
 
-TexData bntxExtract(const Bytes& d, int maxSize, const std::string& want) {
+TexData bntxExtract(const Bytes& d, int maxSize, const std::string& want, int layer) {
     Info t = info(d, want);
+    if (layer < 0 || layer >= t.layers) throw Error(fmt("couche %d hors de la texture (%d couches)", layer, t.layers));
+    // (couches d'une texture en tableau : à la suite, chacune avec tous ses mips)
+    size_t layerOff = t.layers > 1 ? t.imageSize / size_t(t.layers) * size_t(layer) : 0;
+    for (auto& o : t.mipOffsets) o += layerOff;
     auto it = formats().find(t.format);
     if (it == formats().end()) throw Error(fmt("format de texture %#06x inconnu", t.format));
     const Fmt& f = it->second;
@@ -151,6 +159,7 @@ TexData bntxExtract(const Bytes& d, int maxSize, const std::string& want) {
     r.format = f.name;
     r.srgb = (t.format & 0xFF) == 6;
     r.compSel = t.compSel;
+    r.layers = t.layers;
     if (t.tileMode == 1) {
         size_t pitch = (wb * bpb + 31) / 32 * 32;
         if (start + pitch * (hb - 1) + wb * bpb > d.size()) throw Error("données hors du fichier");

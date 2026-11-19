@@ -102,6 +102,14 @@ int main(int argc, char** argv) {
             for (auto& t : tiles) for (float h : t.h) if (h == h) sum += h;
             std::printf("%zu tuiles, n=%d, somme %.3f, centre %.3f %.3f %.3f\n", tiles.size(), tiles.empty() ? 0 : tiles[0].n, sum,
                         tiles.empty() ? 0 : tiles[0].cx, tiles.empty() ? 0 : tiles[0].cz, tiles.empty() ? 0 : tiles[0].side);
+            if (std::getenv("TE_MAT") && !tiles.empty() && !tiles[0].ids.empty()) {   // (matières de la première tuile)
+                auto& t = tiles[0];
+                for (int y = 0; y < t.n; y += t.n / 4)
+                    for (int x = 0; x < t.n; x += t.n / 4) {
+                        size_t i = size_t(y * t.n + x) * 4;
+                        std::printf("(%d,%d) %d %d %d %d / %d %d %d %d\n", x, y, t.ids[i], t.ids[i + 1], t.ids[i + 2], t.ids[i + 3], t.wts[i], t.wts[i + 1], t.wts[i + 2], t.wts[i + 3]);
+                    }
+            }
         } else if (cmd == "web") {   // texte des propriétés -> relu avec le modèle de types
             Document d = bymlLoad(readFile(u8path(argv[2])));
             std::string t = toWebText(d.root);

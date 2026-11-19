@@ -187,13 +187,14 @@ void Vk::init(GLFWwindow* win, bool hl) {
     recreateSwapchain(w, h);
 }
 
-void Vk::image(uint32_t w, uint32_t h, uint32_t mips, VkFormat f, VkSampleCountFlagBits s, VkImageUsageFlags u, VkImage& img, VkDeviceMemory& mem) {
+void Vk::image(uint32_t w, uint32_t h, uint32_t mips, VkFormat f, VkSampleCountFlagBits s, VkImageUsageFlags u, VkImage& img, VkDeviceMemory& mem,
+               uint32_t layers) {
     VkImageCreateInfo ic{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ic.imageType = VK_IMAGE_TYPE_2D;
     ic.format = f;
     ic.extent = {w, h, 1};
     ic.mipLevels = mips;
-    ic.arrayLayers = 1;
+    ic.arrayLayers = layers;
     ic.samples = s;
     ic.tiling = VK_IMAGE_TILING_OPTIMAL;
     ic.usage = u;
@@ -208,13 +209,14 @@ void Vk::image(uint32_t w, uint32_t h, uint32_t mips, VkFormat f, VkSampleCountF
     vkBindImageMemory(dev, img, mem, 0);
 }
 
-static VkImageView viewOf(VkDevice dev, VkImage img, VkFormat f, VkImageAspectFlags aspect, uint32_t mips = 1, const VkComponentSwizzle* swz = nullptr) {
+static VkImageView viewOf(VkDevice dev, VkImage img, VkFormat f, VkImageAspectFlags aspect, uint32_t mips = 1, const VkComponentSwizzle* swz = nullptr,
+                          uint32_t layers = 1, bool array = false) {
     VkImageViewCreateInfo vc{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     vc.image = img;
-    vc.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vc.viewType = array || layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
     vc.format = f;
     if (swz) vc.components = {swz[0], swz[1], swz[2], swz[3]};
-    vc.subresourceRange = {aspect, 0, mips, 0, 1};
+    vc.subresourceRange = {aspect, 0, mips, 0, layers};
     VkImageView v;
     check(vkCreateImageView(dev, &vc, nullptr, &v), "vkCreateImageView");
     return v;
@@ -440,7 +442,8 @@ bool Vk::formatOk(VkFormat f) const {
     return fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
 }
 
-VkTex Vk::texture(VkFormat fmt, int w, int h, const void* data, size_t size, const VkComponentSwizzle swz[4], bool mips) {
+VkTex Vk::texture(VkFormat fmt, int w, int h, const void* data, size_t size, const VkComponentSwizzle swz[4], bool mips, int layers, bool array) {
+    uint32_t L = uint32_t(std::max(1, layers));
     VkTex t;
     t.w = w;
     t.h = h;
@@ -451,37 +454,37 @@ VkTex Vk::texture(VkFormat fmt, int w, int h, const void* data, size_t size, con
         (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT))
         while ((std::max(w, h) >> levels) > 0) levels++;
     image(uint32_t(w), uint32_t(h), levels, fmt, VK_SAMPLE_COUNT_1_BIT,
-          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | (levels > 1 ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0), t.img, t.mem);
+          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | (levels > 1 ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0), t.img, t.mem, L);
     VkBuf st = buffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
     std::memcpy(st.map, data, size);
     submitNow([&](VkCommandBuffer c) {
         VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.image = t.img;
-        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, L};
         b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         vkCmdPipelineBarrier(c, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
         VkBufferImageCopy r{};
-        r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, L};
         r.imageExtent = {uint32_t(w), uint32_t(h), 1};
         vkCmdCopyBufferToImage(c, st.buf, t.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r);
         int mw = w, mh = h;
         for (uint32_t i = 1; i < levels; i++) {
             VkImageMemoryBarrier m = b;
-            m.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 1, 0, 1};
+            m.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 1, 0, L};
             m.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             m.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
             m.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
             m.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
             vkCmdPipelineBarrier(c, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &m);
             VkImageBlit bl{};
-            bl.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, 1};
+            bl.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, L};
             bl.srcOffsets[1] = {mw, mh, 1};
             mw = std::max(1, mw / 2);
             mh = std::max(1, mh / 2);
-            bl.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1};
+            bl.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, i, 0, L};
             bl.dstOffsets[1] = {mw, mh, 1};
             vkCmdBlitImage(c, t.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bl, VK_FILTER_LINEAR);
             m.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -491,7 +494,7 @@ VkTex Vk::texture(VkFormat fmt, int w, int h, const void* data, size_t size, con
             vkCmdPipelineBarrier(c, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &m);
         }
         VkImageMemoryBarrier e = b;
-        e.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, levels - 1, 1, 0, 1};
+        e.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, levels - 1, 1, 0, L};
         e.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         e.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         e.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -499,7 +502,7 @@ VkTex Vk::texture(VkFormat fmt, int w, int h, const void* data, size_t size, con
         vkCmdPipelineBarrier(c, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &e);
     });
     free(st);
-    t.view = viewOf(dev, t.img, fmt, VK_IMAGE_ASPECT_COLOR_BIT, levels, swz);
+    t.view = viewOf(dev, t.img, fmt, VK_IMAGE_ASPECT_COLOR_BIT, levels, swz, L, array);
     VkDescriptorSetAllocateInfo da{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     da.descriptorPool = descPool;
     da.descriptorSetCount = 1;

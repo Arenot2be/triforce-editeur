@@ -79,7 +79,9 @@ public:
     void free(VkBuf& b);
     void submitNow(const std::function<void(VkCommandBuffer)>& f);
     // texture : données du niveau 0 ; RGBA8 : mipmaps générées ; swz : VkComponentSwizzle pour R G B A
-    VkTex texture(VkFormat fmt, int w, int h, const void* data, size_t size, const VkComponentSwizzle swz[4], bool mips);
+    // (layers > 1 ou array : texture en tableau, couches à la suite dans data)
+    VkTex texture(VkFormat fmt, int w, int h, const void* data, size_t size, const VkComponentSwizzle swz[4], bool mips, int layers = 1,
+                  bool array = false);
     void free(VkTex& t);
     bool formatOk(VkFormat f) const;
     VkShaderModule shader(const uint32_t* code, size_t bytes);
@@ -88,7 +90,8 @@ private:
     GLFWwindow* win_ = nullptr;
     void createTargets();
     void destroyTargets();
-    void image(uint32_t w, uint32_t h, uint32_t mips, VkFormat f, VkSampleCountFlagBits s, VkImageUsageFlags u, VkImage& img, VkDeviceMemory& mem);
+    void image(uint32_t w, uint32_t h, uint32_t mips, VkFormat f, VkSampleCountFlagBits s, VkImageUsageFlags u, VkImage& img, VkDeviceMemory& mem,
+               uint32_t layers = 1);
 };
 
 void check(VkResult r, const char* what);

@@ -12,6 +12,7 @@ struct TerrainTile {
     int n = 0;
     std::vector<float> h;       // n x n hauteurs (mètres ; NaN = trou)
     std::vector<uint8_t> mat;   // n x n numéros de matière
+    std::vector<uint8_t> ids, wts;   // n x n x 4 : matières (127 : aucune) et poids (somme 255) ; vides si inconnus
 };
 
 std::vector<std::string> terrainScenes(const Game& game);

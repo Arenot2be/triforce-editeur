@@ -921,7 +921,66 @@ static std::array<float, 3> matColor(int m, float) {
     return {c[0], c[1], c[2]};
 }
 
+// Textures du sol : Tex/MaterialAlb.bntx.zs, une texture en tableau dont la couche k est la matière k des .mate.
+// Lue une fois (niveau de mip ≤ 256 pixels), décodée sur le processeur si ASTC.
+void Editor::loadTerrainMaterials() {
+    if (terrainMatAsked || !game) return;
+    terrainMatAsked = true;
+    terrainMatStatus = "textures du sol : chargement…";
+    Game* g = game.get();
+    jobs.add(0, [this, g]() -> std::function<void()> {
+        struct R { int w = 0, h = 0, layers = 0; VkFormat f = VK_FORMAT_R8G8B8A8_UNORM; Bytes data; std::string why; };
+        auto r = std::make_shared<R>();
+        try {
+            std::string rel = g->texFile("MaterialAlb");
+            if (rel.empty()) throw Error("Tex/MaterialAlb.bntx.zs introuvable");
+            Bytes raw = g->read(rel);
+            TexData t0 = bntxExtract(raw, 256, "", 0);
+            r->layers = t0.layers;
+            r->w = t0.w;
+            r->h = t0.h;
+            bool astc = t0.code >= 20;
+            if (!astc) {
+                switch (t0.code) {
+                    case 1: r->f = VK_FORMAT_R8G8B8A8_UNORM; break;
+                    case 2: r->f = VK_FORMAT_BC1_RGBA_UNORM_BLOCK; break;
+                    case 3: r->f = VK_FORMAT_BC2_UNORM_BLOCK; break;
+                    case 4: r->f = VK_FORMAT_BC3_UNORM_BLOCK; break;
+                    case 7: r->f = VK_FORMAT_BC7_UNORM_BLOCK; break;
+                    default: throw Error("format " + t0.format + " des textures du sol non pris en charge");
+                }
+            }
+            for (int L = 0; L < r->layers; L++) {
+                TexData t = L ? bntxExtract(raw, 256, "", L) : t0;
+                if (t.w != r->w || t.h != r->h) throw Error("couches de tailles différentes");
+                if (astc) {
+                    int i = t.code - 20;
+                    Bytes px = astcDecode(t.blocks.data(), t.blocks.size(), t.w, t.h, ASTC_DIMS[i][0], ASTC_DIMS[i][1], t.srgb, true, true, nullptr);
+                    r->data.insert(r->data.end(), px.begin(), px.end());
+                } else {
+                    r->data.insert(r->data.end(), t.blocks.begin(), t.blocks.end());
+                }
+            }
+            r->why = fmt("textures du sol : %d matières %dx%d (%s)", r->layers, r->w, r->h, t0.format.c_str());
+        } catch (const std::exception& e) {
+            r->layers = 0;
+            r->why = std::string("textures du sol : ") + e.what();
+        }
+        return [this, r] {
+            terrainMatStatus = r->why;
+            if (!r->layers) return;
+            if (r->f != VK_FORMAT_R8G8B8A8_UNORM && !(vk.bc && vk.formatOk(r->f))) { terrainMatStatus += " ; format refusé par la carte graphique"; return; }
+            try {
+                rend.setTerrainMaterials(r->f, r->w, r->h, r->layers, r->data.data(), r->data.size());
+            } catch (const std::exception& e) {
+                terrainMatStatus = std::string("textures du sol : ") + e.what();
+            }
+        };
+    });
+}
+
 void Editor::setTerrain(const std::string& scene) {
+    loadTerrainMaterials();
     terrainScene = scene;
     tiles.clear();
     rend.setTerrain({}, {});
@@ -932,10 +991,33 @@ void Editor::setTerrain(const std::string& scene) {
         auto tl = std::make_shared<std::vector<TerrainTile>>();
         auto vv = std::make_shared<std::vector<TerrVert>>();
         auto ii = std::make_shared<std::vector<uint32_t>>();
+        auto ids = std::make_shared<std::vector<uint8_t>>(), wts = std::make_shared<std::vector<uint8_t>>();
+        auto grid = std::make_shared<int>(0);
         std::string why;
         try {
             *tl = terrainBuild(*g, scene);
-            for (auto& t : *tl) {
+            bool allMat = !tl->empty();
+            for (auto& t : *tl) { *grid = std::max(*grid, t.n); if (t.ids.empty()) allMat = false; }
+            if (allMat) {
+                size_t G = size_t(*grid);
+                ids->assign(G * G * 4 * tl->size(), 127);
+                wts->assign(ids->size(), 0);
+                for (size_t k = 0; k < tl->size(); k++) {
+                    auto& t = (*tl)[k];
+                    for (int y = 0; y < t.n; y++)
+                        for (int x = 0; x < t.n; x++)
+                            for (int c = 0; c < 4; c++) {
+                                size_t dst = ((k * G + size_t(y)) * G + size_t(x)) * 4 + size_t(c), src = (size_t(y * t.n + x)) * 4 + size_t(c);
+                                (*ids)[dst] = t.ids[src];
+                                (*wts)[dst] = t.wts[src];
+                            }
+                }
+            } else {
+                ids->clear();
+                wts->clear();
+            }
+            for (size_t ti = 0; ti < tl->size(); ti++) {
+                auto& t = (*tl)[ti];
                 uint32_t base = uint32_t(vv->size());
                 int n = t.n;
                 for (int y = 0; y < n; y++)
@@ -943,7 +1025,8 @@ void Editor::setTerrain(const std::string& scene) {
                         float h = t.h[size_t(y * n + x)];
                         float px = t.cx - t.side / 2 + t.side * x / (n - 1), pz = t.cz - t.side / 2 + t.side * y / (n - 1);
                         auto c = matColor(t.mat[size_t(y * n + x)], std::isfinite(h) ? h : 0);
-                        vv->push_back({{px, std::isfinite(h) ? h : 0.f, pz}, {c[0], c[1], c[2], 1}});
+                        vv->push_back({{px, std::isfinite(h) ? h : 0.f, pz}, {c[0], c[1], c[2], float(n)},
+                                       {float(x) / float(n - 1), float(y) / float(n - 1), float(ti)}});
                     }
                 for (int y = 0; y + 1 < n; y++)
                     for (int x = 0; x + 1 < n; x++) {
@@ -957,11 +1040,12 @@ void Editor::setTerrain(const std::string& scene) {
         } catch (const std::exception& e) {
             why = e.what();
         }
-        return [this, scene, tl, vv, ii, why] {
+        return [this, scene, tl, vv, ii, ids, wts, grid, why] {
             if (terrainScene != scene) return;
             if (!why.empty()) { terrainStatus = "terrain illisible : " + why; return; }
+            size_t nt = tl->size();
             tiles = std::move(*tl);
-            rend.setTerrain(*vv, *ii);
+            rend.setTerrain(*vv, *ii, *ids, *wts, *grid, int(nt));
             terrainStatus = fmt("%zu tuiles", tiles.size());
         };
     });

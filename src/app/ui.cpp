@@ -595,6 +595,15 @@ void viewport(Editor& ed) {
     }
     ImGui::SameLine();
     ImGui::TextDisabled("%s", ed.terrainStatus.c_str());
+    if (ImGui::IsItemHovered() && !ed.terrainMatStatus.empty()) ImGui::SetTooltip("%s", ed.terrainMatStatus.c_str());
+    if (ed.rend.terrLayers > 0) {
+        // (taille d'une répétition des textures du sol, en mètres : celle du jeu n'est pas encore lue)
+        ImGui::SameLine();
+        float m = 1.f / ed.rend.terrUvScale;
+        ImGui::SetNextItemWidth(70);
+        if (ImGui::DragFloat("##solm", &m, 0.05f, 0.5f, 50.f, "sol %.1f m")) ed.rend.terrUvScale = 1.f / std::max(0.5f, m);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nTaille d'une répétition des textures du sol (glisser pour régler)", ed.terrainMatStatus.c_str());
+    }
     ImGui::SameLine();
     ImGui::Checkbox("Incliner", &ed.tilt);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Montrer aussi les anneaux rouge (axe X) et bleu (axe Z) pour pencher les objets");

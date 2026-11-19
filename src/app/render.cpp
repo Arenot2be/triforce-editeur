@@ -82,8 +82,19 @@ void Renderer::init() {
     check(vkCreatePipelineLayout(vk.dev, &lc, nullptr, &layout), "vkCreatePipelineLayout");
     meshPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 20,
                         {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
-    terrPipe = pipeline(SPV_TERRAIN_VERT, sizeof SPV_TERRAIN_VERT, SPV_TERRAIN_FRAG, sizeof SPV_TERRAIN_FRAG, 28,
-                        {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
+    {
+        VkDescriptorSetLayout sets[3] = {vk.texLayout, vk.texLayout, vk.texLayout};
+        VkPipelineLayoutCreateInfo tl = lc;
+        tl.setLayoutCount = 3;
+        tl.pSetLayouts = sets;
+        check(vkCreatePipelineLayout(vk.dev, &tl, nullptr, &terrLayout), "vkCreatePipelineLayout (terrain)");
+        VkPipelineLayout keep = layout;
+        layout = terrLayout;
+        terrPipe = pipeline(SPV_TERRAIN_VERT, sizeof SPV_TERRAIN_VERT, SPV_TERRAIN_FRAG, sizeof SPV_TERRAIN_FRAG, 40,
+                            {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 28}},
+                            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
+        layout = keep;
+    }
     linePipe = pipeline(SPV_LINE_VERT, sizeof SPV_LINE_VERT, SPV_LINE_FRAG, sizeof SPV_LINE_FRAG, 28,
                         {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, true, false, false);
     lineTopPipe = pipeline(SPV_LINE_VERT, sizeof SPV_LINE_VERT, SPV_LINE_FRAG, sizeof SPV_LINE_FRAG, 28,
@@ -91,6 +102,7 @@ void Renderer::init() {
     uint32_t px = 0xFFFFFFFF;
     VkComponentSwizzle id[4] = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
     white = vk.texture(VK_FORMAT_R8G8B8A8_UNORM, 1, 1, &px, 4, id, false);
+    whiteArr = vk.texture(VK_FORMAT_R8G8B8A8_UNORM, 1, 1, &px, 4, id, false, 1, true);
     // boîte unité (objets sans modèle)
     Mesh m;
     const float s = 0.5f;
@@ -129,12 +141,33 @@ void Renderer::free(GpuMesh& g) {
     g.subs.clear();
 }
 
-void Renderer::setTerrain(const std::vector<TerrVert>& v, const std::vector<uint32_t>& idx) {
+void Renderer::setTerrainMaterials(VkFormat f, int w, int h, int layers, const void* data, size_t size) {
+    vkDeviceWaitIdle(vk.dev);
+    vk.free(terrAlb);
+    terrLayers = 0;
+    if (!layers || !data) return;
+    VkComponentSwizzle id[4] = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    terrAlb = vk.texture(f, w, h, data, size, id, true, layers, true);
+    terrLayers = layers;
+}
+
+void Renderer::setTerrain(const std::vector<TerrVert>& v, const std::vector<uint32_t>& idx, const std::vector<uint8_t>& ids,
+                          const std::vector<uint8_t>& wts, int grid, int tiles) {
     vkDeviceWaitIdle(vk.dev);
     vk.free(terrVb);
     vk.free(terrIb);
+    vk.free(terrIds);
+    vk.free(terrWts);
     terrCount = 0;
     if (v.empty() || idx.empty()) return;
+    if (grid > 1 && tiles > 0 && ids.size() == size_t(grid) * size_t(grid) * 4 * size_t(tiles) && wts.size() == ids.size()) {
+        VkComponentSwizzle id[4] = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+        uint32_t maxL = vk.props.limits.maxImageArrayLayers;
+        if (uint32_t(tiles) <= maxL) {
+            terrIds = vk.texture(VK_FORMAT_R8G8B8A8_UNORM, grid, grid, ids.data(), ids.size(), id, false, tiles, true);
+            terrWts = vk.texture(VK_FORMAT_R8G8B8A8_UNORM, grid, grid, wts.data(), wts.size(), id, false, tiles, true);
+        }
+    }
     terrVb = vk.upload(v.data(), v.size() * sizeof(TerrVert), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     terrIb = vk.upload(idx.data(), idx.size() * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     terrCount = uint32_t(idx.size());
@@ -161,8 +194,14 @@ void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const
 void Renderer::drawTerrain(VkCommandBuffer c, const PC& pc) {
     if (!terrCount) return;
     vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, terrPipe);
-    vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &white.set, 0, nullptr);
-    vkCmdPushConstants(c, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &pc);
+    bool tex = terrLayers > 0 && terrIds.set && terrWts.set;
+    VkDescriptorSet sets[3] = {tex ? terrAlb.set : whiteArr.set, tex ? terrIds.set : whiteArr.set, tex ? terrWts.set : whiteArr.set};
+    vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, terrLayout, 0, 3, sets, 0, nullptr);
+    PC p = pc;
+    p.scale[0] = terrUvScale;
+    p.scale[1] = float(terrLayers);
+    p.scale[3] = tex ? 1.f : 0.f;
+    vkCmdPushConstants(c, terrLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p);
     VkDeviceSize off = 0;
     vkCmdBindVertexBuffers(c, 0, 1, &terrVb.buf, &off);
     vkCmdBindIndexBuffer(c, terrIb.buf, 0, VK_INDEX_TYPE_UINT32);
@@ -199,10 +238,15 @@ void Renderer::destroy() {
     for (auto& b : lineBuf_) vk.free(b);
     vk.free(terrVb);
     vk.free(terrIb);
+    vk.free(terrIds);
+    vk.free(terrWts);
+    vk.free(terrAlb);
     free(cube);
     vk.free(white);
+    vk.free(whiteArr);
     for (auto p : {meshPipe, terrPipe, linePipe, lineTopPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
     vkDestroyPipelineLayout(vk.dev, layout, nullptr);
+    vkDestroyPipelineLayout(vk.dev, terrLayout, nullptr);
 }
 
 }  // namespace te

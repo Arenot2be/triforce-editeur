@@ -26,15 +26,15 @@ struct GpuMesh {
 };
 
 struct LineVert { float p[3]; float c[4]; };
-struct TerrVert { float p[3]; float c[4]; };
+struct TerrVert { float p[3]; float c[4]; float t[3]; };   // (c.a : côté de la grille de la tuile ; t : place dans la tuile, n° de tuile)
 
 class Renderer {
 public:
     explicit Renderer(Vk& v) : vk(v) {}
     Vk& vk;
-    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkPipelineLayout layout = VK_NULL_HANDLE, terrLayout = VK_NULL_HANDLE;
     VkPipeline meshPipe = VK_NULL_HANDLE, terrPipe = VK_NULL_HANDLE, linePipe = VK_NULL_HANDLE, lineTopPipe = VK_NULL_HANDLE;
-    VkTex white;
+    VkTex white, whiteArr;
     GpuMesh cube;
 
     void init();
@@ -45,7 +45,14 @@ public:
     // terrain : un seul maillage
     VkBuf terrVb, terrIb;
     uint32_t terrCount = 0;
-    void setTerrain(const std::vector<TerrVert>& v, const std::vector<uint32_t>& idx);
+    // ids, wts : grid × grid × 4 octets par tuile (couches) ; vides : couleurs seules
+    void setTerrain(const std::vector<TerrVert>& v, const std::vector<uint32_t>& idx, const std::vector<uint8_t>& ids = {},
+                    const std::vector<uint8_t>& wts = {}, int grid = 0, int tiles = 0);
+    // textures des matières du sol (RGBA8 ou format compressé lu par la carte graphique), une couche par matière
+    VkTex terrAlb, terrIds, terrWts;
+    int terrLayers = 0;
+    float terrUvScale = 0.25f;   // (répétitions par mètre)
+    void setTerrainMaterials(VkFormat f, int w, int h, int layers, const void* data, size_t size);
 
     // lignes de la trame (grille, sélection) ; top : par-dessus tout
     std::vector<LineVert> lines, linesTop;

@@ -170,7 +170,10 @@ public:
     std::string terrainScene;   // ("" : aucun)
     std::vector<TerrainTile> tiles;
     std::string terrainStatus;
+    std::string terrainMatStatus;   // (textures du sol : Tex/MaterialAlb)
+    bool terrainMatAsked = false;
     void setTerrain(const std::string& scene);
+    void loadTerrainMaterials();
     std::string autoTerrain() const;
     bool groundAt(double x, double z, double& h) const;
     void freeAssets();

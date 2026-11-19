@@ -15,9 +15,10 @@ struct TexData {
     std::string format;
     bool srgb = false;
     uint32_t compSel = 0x05040302;   // (rouge, vert, bleu, alpha : 0 zéro, 1 un, 2..5 canal R G B A)
+    int layers = 1;                  // (texture en tableau : nombre de couches)
 };
 
-TexData bntxExtract(const Bytes& data, int maxSize = 512, const std::string& want = "");
+TexData bntxExtract(const Bytes& data, int maxSize = 512, const std::string& want = "", int layer = 0);
 std::vector<std::string> bntxNames(const Bytes& data);   // (noms des textures ; "" si hors des données)
 std::string bntxDiagnose(const Bytes& data, const std::string& want = "");
 

@@ -187,6 +187,9 @@ std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene
         t.n = k;
         t.h.resize(size_t(k * k));
         t.mat.assign(size_t(k * k), 0);
+        // (.mate : 4 numéros de matière par point (127 : aucune), puis, une grille plus loin, leurs 4 poids (somme 255))
+        bool full = !mblobs.empty() && mblobs[0].second >= 2 * blSize;
+        if (full) { t.ids.assign(size_t(k * k) * 4, 127); t.wts.assign(size_t(k * k) * 4, 0); }
         for (int y = 0; y < k; y++)
             for (int x = 0; x < k; x++) {
                 size_t o = hb + BL(size_t(p.i0 + x * step) * 4, size_t(p.j0 + y * step));
@@ -195,6 +198,11 @@ std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene
                 if (!mblobs.empty()) {
                     size_t mo = mblobs[0].first + BL(size_t(p.i0 + x * step) * 4, size_t(p.j0 + y * step));
                     if (mo < mdata.size()) t.mat[size_t(y * k + x)] = mdata[mo];
+                    if (full && mo + blSize + 4 <= mdata.size())
+                        for (int c = 0; c < 4; c++) {
+                            t.ids[size_t(y * k + x) * 4 + size_t(c)] = mdata[mo + size_t(c)];
+                            t.wts[size_t(y * k + x) * 4 + size_t(c)] = mdata[mo + blSize + size_t(c)];
+                        }
                 }
             }
         double side = a.size * sc.world * p.span / 256;
