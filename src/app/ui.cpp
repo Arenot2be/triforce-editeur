@@ -13,6 +13,34 @@
 namespace te {
 
 namespace {
+
+// ---- mise en page qui revient à la ligne quand la place manque (cases, boutons)
+float btnW(const char* s) { return ImGui::CalcTextSize(s, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2; }
+float smallBtnW(const char* s) { return ImGui::CalcTextSize(s, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2; }
+float chkW(const char* s) { return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(s, nullptr, true).x; }
+float rightEdge() { return ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x; }
+// (l'élément suivant, de largeur w, va sur la même ligne s'il tient avant `right`, sinon à la ligne)
+void sameLineIfFits(float w, float right = -1) {
+    if (right < 0) right = rightEdge();
+    if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + w <= right) ImGui::SameLine();
+}
+// (groupes d'éléments à la suite, renvoyés à la ligne entiers ; largeurs de la trame précédente)
+struct Flow {
+    float right;
+    int idx = 0;
+    std::vector<float>* widths;
+    Flow(float r, std::vector<float>& w) : right(r), widths(&w) {}
+    void begin() {
+        if (widths->size() <= size_t(idx)) widths->resize(size_t(idx) + 1, 0.f);
+        if (idx > 0) sameLineIfFits((*widths)[size_t(idx)], right);
+        ImGui::BeginGroup();
+    }
+    void end() {
+        ImGui::EndGroup();
+        (*widths)[size_t(idx)] = ImGui::GetItemRectSize().x;
+        idx++;
+    }
+};
 const float TOP = 46, BOTTOM = 26, LEFT = 310, RIGHT = 390;
 const char* QUIET[] = {"Land", "EftLoc", "Tree", "Foliage", "Grass"};
 
@@ -182,7 +210,11 @@ void leftPanel(Editor& ed) {
         ImGui::EndChild();
         // catégories
         ImGui::TextDisabled("CATÉGORIES");
-        ImGui::SameLine(LEFT - 120);
+        {
+            float need = smallBtnW("Toutes") + smallBtnW("Aucune") + ImGui::GetStyle().ItemSpacing.x;
+            float x = ImGui::GetWindowContentRegionMax().x - need;
+            ImGui::SameLine(std::max(x, ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + 8));
+        }
         if (ImGui::SmallButton("Toutes")) for (auto& [k, v] : ed.catOn) v = true;
         ImGui::SameLine();
         if (ImGui::SmallButton("Aucune")) for (auto& [k, v] : ed.catOn) v = false;
@@ -282,7 +314,7 @@ void rightPanel(Editor& ed) {
                 for (auto& nt : ms->notes) ImGui::TextColored({0.95f, 0.75f, 0.35f, 1}, "%s", nt.c_str());
                 if (ImGui::SmallButton("Exporter ce modèle pour analyse")) ed.exportModel(n);
                 if (!ms->notes.empty()) {
-                    ImGui::SameLine();
+                    sameLineIfFits(smallBtnW("Copier les remarques"));
                     if (ImGui::SmallButton("Copier les remarques")) {
                         std::string all = n;
                         for (auto& nt : ms->notes) all += "\n  " + nt;
@@ -293,7 +325,7 @@ void rightPanel(Editor& ed) {
                 ImGui::TextDisabled("Pas de modèle : %s", ms->why.c_str());
                 // (pour tout modèle illisible, pas seulement les meshlets : la raison affichée suffit à trier ensuite)
                 if (ImGui::SmallButton("Exporter ce modèle pour analyse")) ed.exportModel(n);
-                ImGui::SameLine();
+                sameLineIfFits(smallBtnW("Copier la raison"));
                 if (ImGui::SmallButton("Copier la raison")) ImGui::SetClipboardText((n + " : " + ms->why).c_str());
             } else {
                 ImGui::TextDisabled("Modèle : chargement…");
@@ -342,20 +374,20 @@ void rightPanel(Editor& ed) {
     }
     if (ImGui::Button("Gauche 90°")) ed.rotateSel(1, 3.14159265358979323846 / 2);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Tourner de 90° vers la gauche autour de la verticale (Maj+R)");
-    ImGui::SameLine();
+    sameLineIfFits(btnW("Droite 90°"));
     if (ImGui::Button("Droite 90°")) ed.rotateSel(1, -3.14159265358979323846 / 2);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Tourner de 90° vers la droite autour de la verticale (R)");
-    ImGui::SameLine();
+    sameLineIfFits(btnW("Redresser"));
     if (ImGui::Button("Redresser")) ed.levelSel(U.keepYaw);
-    ImGui::SameLine();
+    sameLineIfFits(chkW("garder le cap"));
     ImGui::Checkbox("garder le cap", &U.keepYaw);
     ImGui::Separator();
     if (ImGui::Button("Centrer")) { std::vector<Rec*> v(ed.sel.begin(), ed.sel.end()); ed.focus(v); }
-    ImGui::SameLine();
+    sameLineIfFits(btnW("Dupliquer"));
     if (ImGui::Button("Dupliquer")) ed.duplicateSel();
-    ImGui::SameLine();
+    sameLineIfFits(btnW("Supprimer"));
     if (ImGui::Button("Supprimer")) ed.deleteSel();
-    ImGui::SameLine();
+    sameLineIfFits(btnW("Poser au sol"));
     ImGui::BeginDisabled(ed.tiles.empty());
     if (ImGui::Button("Poser au sol")) ed.dropToGround();
     ImGui::EndDisabled();
@@ -561,6 +593,9 @@ void viewport(Editor& ed) {
     ImGui::SetCursorScreenPos({p0.x + 10, p0.y + 8});
     ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(18, 22, 28, 215));
     ImGui::BeginChild("##outils", {0, 0}, ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_FrameStyle);
+    static std::vector<float> flowW;
+    Flow fl(p0.x + sz.x - 24, flowW);   // (ne pas dépasser le bord droit de la vue)
+    fl.begin();
     ImGui::Checkbox("Modèles 3D", &ed.showModels);
     ImGui::SameLine();
     {
@@ -573,7 +608,8 @@ void viewport(Editor& ed) {
         ImGui::SameLine(0, 4);
         if ((partial || none) && ImGui::SmallButton(partial ? fmt("%d à problème", partial).c_str() : "détails")) U.showMdl = true;
     }
-    ImGui::SameLine();
+    fl.end();
+    fl.begin();
     ImGui::Checkbox("Textures", &ed.showTextures);
     ImGui::SameLine();
     {
@@ -584,7 +620,8 @@ void viewport(Editor& ed) {
         if (bad && ImGui::SmallButton(fmt("%d illisibles", bad).c_str())) U.showTex = true;
         if (mask) { ImGui::SameLine(); ImGui::TextDisabled("· %d masques ignorés", mask); }
     }
-    ImGui::SameLine();
+    fl.end();
+    fl.begin();
     ImGui::Checkbox("Terrain", &ed.showTerrain);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(170);
@@ -596,9 +633,10 @@ void viewport(Editor& ed) {
     ImGui::SameLine();
     ImGui::TextDisabled("%s", ed.terrainStatus.c_str());
     if (ImGui::IsItemHovered() && !ed.terrainMatStatus.empty()) ImGui::SetTooltip("%s", ed.terrainMatStatus.c_str());
+    fl.end();
     if (ed.rend.terrLayers > 0) {
-        // (taille d'une répétition des textures du sol, en mètres : celle du jeu n'est pas encore lue)
-        ImGui::SameLine();
+        // (taille des textures du sol par rapport à celle du jeu)
+        fl.begin();
         float m = 1.f / ed.rend.terrUvScale;
         ImGui::SetNextItemWidth(70);
         if (ImGui::DragFloat("##solm", &m, 0.01f, 0.1f, 10.f, "sol ×%.2f")) ed.rend.terrUvScale = 1.f / std::max(0.1f, m);
@@ -611,12 +649,14 @@ void viewport(Editor& ed) {
             ImGui::Checkbox("Relief", &ed.rend.terrRelief);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nÉclairer le sol avec le relief de ses textures (Tex/MaterialCmb)", ed.terrainCmbStatus.c_str());
         }
+        fl.end();
     }
-    ImGui::SameLine();
+    fl.begin();
     ImGui::Checkbox("Incliner", &ed.tilt);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Montrer aussi les anneaux rouge (axe X) et bleu (axe Z) pour pencher les objets");
     ImGui::SameLine();
     ImGui::Checkbox("Noms", &ed.showLabels);
+    fl.end();
     ImGui::EndChild();
     ImGui::PopStyleColor();
 
