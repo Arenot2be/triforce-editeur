@@ -606,6 +606,11 @@ void viewport(Editor& ed) {
             ImGui::SetTooltip("%s\n%s\nTaille des textures du sol par rapport au jeu (glisser pour régler ; ×1 : celle du jeu)", ed.terrainMatStatus.c_str(),
                               ed.terrainMatTable ? fmt("%zu matières décrites par la scène", ed.terrainMatTable).c_str()
                                                  : "pas de table des matières : 4 m par répétition");
+        if (ed.rend.terrCmbLayers > 0) {
+            ImGui::SameLine();
+            ImGui::Checkbox("Relief", &ed.rend.terrRelief);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nÉclairer le sol avec le relief de ses textures (Tex/MaterialCmb)", ed.terrainCmbStatus.c_str());
+        }
     }
     ImGui::SameLine();
     ImGui::Checkbox("Incliner", &ed.tilt);

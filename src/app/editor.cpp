@@ -937,55 +937,61 @@ void Editor::loadTerrainMaterials() {
     terrainMatAsked = true;
     terrainMatStatus = "textures du sol : chargement…";
     Game* g = game.get();
-    jobs.add(0, [this, g]() -> std::function<void()> {
-        struct R { int w = 0, h = 0, layers = 0; VkFormat f = VK_FORMAT_R8G8B8A8_UNORM; Bytes data; std::string why; };
-        auto r = std::make_shared<R>();
-        try {
-            std::string rel = g->texFile("MaterialAlb");
-            if (rel.empty()) throw Error("Tex/MaterialAlb.bntx.zs introuvable");
-            Bytes raw = g->read(rel);
-            TexData t0 = bntxExtract(raw, 512, "", 0);
-            r->layers = t0.layers;
-            r->w = t0.w;
-            r->h = t0.h;
-            bool astc = t0.code >= 20;
-            if (!astc) {
-                switch (t0.code) {
-                    case 1: r->f = VK_FORMAT_R8G8B8A8_UNORM; break;
-                    case 2: r->f = VK_FORMAT_BC1_RGBA_UNORM_BLOCK; break;
-                    case 3: r->f = VK_FORMAT_BC2_UNORM_BLOCK; break;
-                    case 4: r->f = VK_FORMAT_BC3_UNORM_BLOCK; break;
-                    case 7: r->f = VK_FORMAT_BC7_UNORM_BLOCK; break;
-                    default: throw Error("format " + t0.format + " des textures du sol non pris en charge");
-                }
-            }
-            for (int L = 0; L < r->layers; L++) {
-                TexData t = L ? bntxExtract(raw, 512, "", L) : t0;
-                if (t.w != r->w || t.h != r->h) throw Error("couches de tailles différentes");
-                if (astc) {
-                    int i = t.code - 20;
-                    Bytes px = astcDecode(t.blocks.data(), t.blocks.size(), t.w, t.h, ASTC_DIMS[i][0], ASTC_DIMS[i][1], t.srgb, true, true, nullptr);
-                    r->data.insert(r->data.end(), px.begin(), px.end());
-                } else {
-                    r->data.insert(r->data.end(), t.blocks.begin(), t.blocks.end());
-                }
-            }
-            r->why = fmt("textures du sol : %d matières %dx%d (%s)", r->layers, r->w, r->h, t0.format.c_str());
-        } catch (const std::exception& e) {
-            r->layers = 0;
-            r->why = std::string("textures du sol : ") + e.what();
-        }
-        return [this, r] {
-            terrainMatStatus = r->why;
-            if (!r->layers) return;
-            if (r->f != VK_FORMAT_R8G8B8A8_UNORM && !(vk.bc && vk.formatOk(r->f))) { terrainMatStatus += " ; format refusé par la carte graphique"; return; }
+    // (MaterialAlb : couleurs ; MaterialCmb : relief, en R et G une normale, en B une hauteur ; facultatif)
+    for (const char* name : {"MaterialAlb", "MaterialCmb"}) {
+        std::string nm = name;
+        bool cmb = nm == "MaterialCmb";
+        jobs.add(0, [this, g, nm, cmb]() -> std::function<void()> {
+            struct R { int w = 0, h = 0, layers = 0; VkFormat f = VK_FORMAT_R8G8B8A8_UNORM; Bytes data; std::string why; };
+            auto r = std::make_shared<R>();
             try {
-                rend.setTerrainMaterials(r->f, r->w, r->h, r->layers, r->data.data(), r->data.size());
+                std::string rel = g->texFile(nm);
+                if (rel.empty()) throw Error("Tex/" + nm + ".bntx.zs introuvable");
+                Bytes raw = g->read(rel);
+                TexData t0 = bntxExtract(raw, 512, "", 0);
+                r->layers = t0.layers;
+                r->w = t0.w;
+                r->h = t0.h;
+                bool astc = t0.code >= 20;
+                if (!astc) {
+                    switch (t0.code) {
+                        case 1: r->f = VK_FORMAT_R8G8B8A8_UNORM; break;
+                        case 2: r->f = VK_FORMAT_BC1_RGBA_UNORM_BLOCK; break;
+                        case 3: r->f = VK_FORMAT_BC2_UNORM_BLOCK; break;
+                        case 4: r->f = VK_FORMAT_BC3_UNORM_BLOCK; break;
+                        case 7: r->f = VK_FORMAT_BC7_UNORM_BLOCK; break;
+                        default: throw Error("format " + t0.format + " non pris en charge");
+                    }
+                }
+                for (int L = 0; L < r->layers; L++) {
+                    TexData t = L ? bntxExtract(raw, 512, "", L) : t0;
+                    if (t.w != r->w || t.h != r->h) throw Error("couches de tailles différentes");
+                    if (astc) {
+                        int i = t.code - 20;
+                        Bytes px = astcDecode(t.blocks.data(), t.blocks.size(), t.w, t.h, ASTC_DIMS[i][0], ASTC_DIMS[i][1], t.srgb, true, true, nullptr);
+                        r->data.insert(r->data.end(), px.begin(), px.end());
+                    } else {
+                        r->data.insert(r->data.end(), t.blocks.begin(), t.blocks.end());
+                    }
+                }
+                r->why = fmt("%s : %d matières %dx%d (%s)", cmb ? "relief du sol" : "textures du sol", r->layers, r->w, r->h, t0.format.c_str());
             } catch (const std::exception& e) {
-                terrainMatStatus = std::string("textures du sol : ") + e.what();
+                r->layers = 0;
+                r->why = std::string(cmb ? "relief du sol : " : "textures du sol : ") + e.what();
             }
-        };
-    });
+            return [this, r, cmb] {
+                std::string& st = cmb ? terrainCmbStatus : terrainMatStatus;
+                st = r->why;
+                if (!r->layers) return;
+                if (r->f != VK_FORMAT_R8G8B8A8_UNORM && !(vk.bc && vk.formatOk(r->f))) { st += " ; format refusé par la carte graphique"; return; }
+                try {
+                    rend.setTerrainMaterials(r->f, r->w, r->h, r->layers, r->data.data(), r->data.size(), cmb);
+                } catch (const std::exception& e) {
+                    st = std::string(cmb ? "relief du sol : " : "textures du sol : ") + e.what();
+                }
+            };
+        });
+    }
 }
 
 void Editor::setTerrain(const std::string& scene) {

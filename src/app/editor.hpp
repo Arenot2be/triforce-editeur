@@ -170,7 +170,8 @@ public:
     std::string terrainScene;   // ("" : aucun)
     std::vector<TerrainTile> tiles;
     std::string terrainStatus;
-    std::string terrainMatStatus;   // (textures du sol : Tex/MaterialAlb)
+    std::string terrainMatStatus, terrainCmbStatus;   // (textures du sol : Tex/MaterialAlb, relief : Tex/MaterialCmb)
+    bool terrainRelief = true;
     bool terrainMatAsked = false;
     size_t terrainMatTable = 0;   // (matières décrites par le .tscb de la scène)
     void setTerrain(const std::string& scene);

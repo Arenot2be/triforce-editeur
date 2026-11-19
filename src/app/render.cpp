@@ -87,9 +87,9 @@ void Renderer::init() {
                              {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false,
                              false, true);
     {
-        VkDescriptorSetLayout sets[4] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout};
+        VkDescriptorSetLayout sets[5] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout};
         VkPipelineLayoutCreateInfo tl = lc;
-        tl.setLayoutCount = 4;
+        tl.setLayoutCount = 5;
         tl.pSetLayouts = sets;
         check(vkCreatePipelineLayout(vk.dev, &tl, nullptr, &terrLayout), "vkCreatePipelineLayout (terrain)");
         VkPipelineLayout keep = layout;
@@ -164,14 +164,16 @@ void Renderer::setTerrainTable(const std::vector<std::array<float, 3>>& t) {
     terrMat = vk.texture(VK_FORMAT_R8G8B8A8_UNORM, 128, 1, px.data(), px.size(), id, false, 1, true);
 }
 
-void Renderer::setTerrainMaterials(VkFormat f, int w, int h, int layers, const void* data, size_t size) {
+void Renderer::setTerrainMaterials(VkFormat f, int w, int h, int layers, const void* data, size_t size, bool relief) {
     vkDeviceWaitIdle(vk.dev);
-    vk.free(terrAlb);
-    terrLayers = 0;
+    VkTex& t = relief ? terrCmb : terrAlb;
+    int& n = relief ? terrCmbLayers : terrLayers;
+    vk.free(t);
+    n = 0;
     if (!layers || !data) return;
     VkComponentSwizzle id[4] = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-    terrAlb = vk.texture(f, w, h, data, size, id, true, layers, true);
-    terrLayers = layers;
+    t = vk.texture(f, w, h, data, size, id, true, layers, true);
+    n = layers;
 }
 
 void Renderer::setTerrain(const std::vector<TerrVert>& v, const std::vector<uint32_t>& idx, const std::vector<uint8_t>& ids,
@@ -227,12 +229,15 @@ void Renderer::drawTerrain(VkCommandBuffer c, const PC& pc) {
     vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, terrPipe);
     if (!terrMat.set) setTerrainTable({});
     bool tex = terrLayers > 0 && terrIds.set && terrWts.set;
-    VkDescriptorSet sets[4] = {tex ? terrAlb.set : whiteArr.set, tex ? terrIds.set : whiteArr.set, tex ? terrWts.set : whiteArr.set, terrMat.set};
-    vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, terrLayout, 0, 4, sets, 0, nullptr);
+    bool relief = tex && terrRelief && terrCmbLayers == terrLayers && terrCmb.set;
+    VkDescriptorSet sets[5] = {tex ? terrAlb.set : whiteArr.set, tex ? terrIds.set : whiteArr.set, tex ? terrWts.set : whiteArr.set, terrMat.set,
+                               relief ? terrCmb.set : whiteArr.set};
+    vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, terrLayout, 0, 5, sets, 0, nullptr);
     PC p = pc;
     p.scale[0] = terrUvScale;
     p.scale[1] = float(terrLayers);
     p.scale[3] = tex ? 1.f : 0.f;
+    p.scale[2] = relief ? 1.f : 0.f;
     vkCmdPushConstants(c, terrLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p);
     VkDeviceSize off = 0;
     vkCmdBindVertexBuffers(c, 0, 1, &terrVb.buf, &off);
@@ -274,6 +279,7 @@ void Renderer::destroy() {
     vk.free(terrWts);
     vk.free(terrAlb);
     vk.free(terrMat);
+    vk.free(terrCmb);
     free(cube);
     vk.free(white);
     vk.free(whiteArr);
