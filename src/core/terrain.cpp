@@ -130,6 +130,22 @@ std::vector<std::string> terrainScenes(const Game& game) {
     return out;
 }
 
+// Rangement des hauteurs : celui des textures du jeu (texBlockLinear) ou l'ancien (blockLinear). On garde celui qui
+// donne le relief le plus lisse sur l'ensemble de la tuile, à pleine résolution.
+static bool altLayout(const Bytes& d, size_t hb, size_t wg) {
+    double rough[2] = {0, 0};
+    for (int alt = 0; alt < 2; alt++) {
+        auto at = [&](int x, int y) {
+            size_t o = hb + (alt ? texBlockLinear(size_t(x) * 4, size_t(y), wg, 16) : blockLinear(size_t(x) * 4, size_t(y), wg, 16));
+            float v = o + 4 <= d.size() ? rdf(d, o) : 0.f;
+            return std::isfinite(v) ? double(v) : 0.0;
+        };
+        for (int y = 0; y + 1 < NSRC; y += 3)
+            for (int x = 0; x + 1 < NSRC; x++) rough[alt] += std::fabs(at(x + 1, y) - at(x, y)) + std::fabs(at(x, y + 1) - at(x, y));
+    }
+    return rough[1] < rough[0];
+}
+
 std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene, int budget) {
     fs::path root = game.path("TerrainArc");
     Scene sc = parseTscb(readFile(root / u8path(scene + ".tscb")));
@@ -144,6 +160,7 @@ std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene
     std::vector<TerrainTile> out;
     std::string cached;
     Bytes hdata, mdata;
+    bool alt = false, decide = false;
     std::vector<std::pair<size_t, size_t>> hblobs, mblobs;
     size_t wg = (NSRC * 4 + 63) / 64;
     size_t blSize = wg * 64 * ((NSRC + 127) / 128 * 128);
@@ -152,6 +169,7 @@ std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene
         if (cached != p.name) {
             cached = p.name;
             tarb(readFile(path(p.name, ".hght")), hdata, hblobs);
+            decide = true;
             mdata.clear();
             mblobs.clear();
             fs::path mp = path(p.name, ".mate");
@@ -161,6 +179,8 @@ std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene
         size_t hb = SIZE_MAX;
         for (auto& [s, ln] : hblobs) if (ln == blSize) { hb = s; break; }
         if (hb == SIZE_MAX) throw Error("tuile de hauteurs au format inattendu");
+        if (decide) { alt = altLayout(hdata, hb, wg); decide = false; }   // (décidé pour chaque fichier .hght)
+        auto BL = [&](size_t xb, size_t y) { return alt ? texBlockLinear(xb, y, wg, 16) : blockLinear(xb, y, wg, 16); };
         int k = std::max(2, std::min(n, p.span / 4 + 1));
         int step = p.span / (k - 1);
         TerrainTile t;
@@ -169,11 +189,11 @@ std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene
         t.mat.assign(size_t(k * k), 0);
         for (int y = 0; y < k; y++)
             for (int x = 0; x < k; x++) {
-                size_t o = hb + blockLinear(size_t(p.i0 + x * step) * 4, size_t(p.j0 + y * step), wg, 16);
+                size_t o = hb + BL(size_t(p.i0 + x * step) * 4, size_t(p.j0 + y * step));
                 float v = o + 4 <= hdata.size() ? rdf(hdata, o) : NAN;
                 t.h[size_t(y * k + x)] = std::isfinite(v) ? float(v * sc.hscale) : NAN;
                 if (!mblobs.empty()) {
-                    size_t mo = mblobs[0].first + blockLinear(size_t(p.i0 + x * step) * 4, size_t(p.j0 + y * step), wg, 16);
+                    size_t mo = mblobs[0].first + BL(size_t(p.i0 + x * step) * 4, size_t(p.j0 + y * step));
                     if (mo < mdata.size()) t.mat[size_t(y * k + x)] = mdata[mo];
                 }
             }

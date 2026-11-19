@@ -910,11 +910,15 @@ std::string Editor::autoTerrain() const {
     return best;
 }
 
-static std::array<float, 3> matColor(int m, float h) {
-    auto c = hueColor(fmt("mat%d", m));
-    float g[3] = {0.36f, 0.45f, 0.24f};   // (teinte d'herbe, nuancée par la matière)
-    float k = std::clamp(0.85f + h / 600.f, 0.6f, 1.15f);
-    return {(g[0] * 0.6f + c[0] * 0.4f) * k, (g[1] * 0.6f + c[1] * 0.4f) * k, (g[2] * 0.6f + c[2] * 0.4f) * k};
+// (les matières du terrain ne sont pas encore reliées à leurs textures : une teinte naturelle par numéro de matière,
+// prise dans une palette d'herbes, de terres et de sables ; le shader ajoute la roche dans les pentes)
+static std::array<float, 3> matColor(int m, float) {
+    static const float P[10][3] = {{0.34f, 0.43f, 0.22f}, {0.29f, 0.39f, 0.20f}, {0.40f, 0.46f, 0.26f}, {0.45f, 0.38f, 0.27f},
+                                   {0.38f, 0.32f, 0.24f}, {0.52f, 0.47f, 0.36f}, {0.31f, 0.36f, 0.24f}, {0.42f, 0.42f, 0.30f},
+                                   {0.36f, 0.30f, 0.22f}, {0.47f, 0.50f, 0.32f}};
+    uint32_t k = uint32_t(m) * 2654435761u;
+    const float* c = P[(k >> 16) % 10];
+    return {c[0], c[1], c[2]};
 }
 
 void Editor::setTerrain(const std::string& scene) {
