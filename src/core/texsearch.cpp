@@ -73,8 +73,8 @@ void searchTextures(Game& g, TexSearch& s, int threads) {
             for (size_t i = 0; i < d.size(); i++) { uint8_t c = d[i]; low[i] = (c >= 'A' && c <= 'Z') ? uint8_t(c + 32) : c; }
             bool any = false;
             for (size_t k = 0; k < n; k++) {
-                const std::string& p = fam[k];
-                if (p.empty()) continue;
+                if (fam[k].empty()) continue;
+                const Bytes p(fam[k].begin(), fam[k].end());   // (même type d'octets que le tampon, exigé par MSVC)
                 std::boyer_moore_horspool_searcher sr(p.begin(), p.end());
                 auto it = low.begin();
                 int shown = 0;
@@ -101,7 +101,7 @@ void searchTextures(Game& g, TexSearch& s, int threads) {
             }
             if (!any) return;
             // (textures BNTX de ce tampon qui portent un des noms cherchés)
-            static const char M[4] = {'B', 'N', 'T', 'X'};
+            static const uint8_t M[4] = {'B', 'N', 'T', 'X'};
             for (auto it = std::search(d.begin(), d.end(), M, M + 4); it != d.end(); it = std::search(it + 1, d.end(), M, M + 4)) {
                 size_t o = size_t(it - d.begin());
                 try {
