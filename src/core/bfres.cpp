@@ -476,6 +476,12 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     auto subOf = [&](uint32_t start, uint32_t count, int matIdx, const std::string& tex) {
         Mesh::Sub s{start, count, tex, 0, size_t(matIdx) < matNames.size() ? matNames[size_t(matIdx)] : ""};
         if (tex.empty()) s.kind = surfaceKind(s.material, size_t(matIdx) < materials.size() ? materials[size_t(matIdx)] : std::vector<std::string>{});
+        // (eau : sa carte de normales, pour les vagues)
+        if (s.kind == 1 && size_t(matIdx) < materials.size())
+            for (auto& n : materials[size_t(matIdx)]) {
+                std::string l = lower(n);
+                if (l.find("_nrm") != std::string::npos && l.rfind("cmntex_bake", 0) != 0) { s.nrm = n; break; }
+            }
         return s;
     };
     size_t vtxArr = r.ptr(mdl + 0x20), vtxStride = 0x60;

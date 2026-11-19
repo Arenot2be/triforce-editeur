@@ -9,7 +9,7 @@ import tempfile
 root = os.path.join(os.path.dirname(__file__), "..")
 glslang = sys.argv[1]
 out = ["// Généré par tools/gen_shaders.py à partir de shaders/ : ne pas modifier à la main.", "#pragma once", "#include <cstdint>", ""]
-for name in ["mesh.vert", "mesh.frag", "terrain.vert", "terrain.frag", "line.vert", "line.frag"]:
+for name in ["mesh.vert", "mesh.frag", "water.vert", "water.frag", "terrain.vert", "terrain.frag", "line.vert", "line.frag"]:
     with tempfile.TemporaryDirectory() as t:
         spv = os.path.join(t, "o.spv")
         subprocess.run([glslang, "-V", "--target-env", "vulkan1.1", "-o", spv, os.path.join(root, "shaders", name)], check=True,

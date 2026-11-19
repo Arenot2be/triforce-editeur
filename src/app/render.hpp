@@ -20,7 +20,7 @@ static_assert(sizeof(PC) == 128, "constantes de 128 octets");
 
 struct GpuMesh {
     VkBuf vb, ib;
-    struct Sub { uint32_t start, count; std::string tex; int kind = 0; };
+    struct Sub { uint32_t start, count; std::string tex; int kind = 0; std::string nrm; };
     std::vector<Sub> subs;
     bool translucent = false;   // (a des parties d'eau, de fondu ou de verre)
     float bbox[6] = {0, 0, 0, 0, 0, 0};
@@ -35,7 +35,7 @@ public:
     explicit Renderer(Vk& v) : vk(v) {}
     Vk& vk;
     VkPipelineLayout layout = VK_NULL_HANDLE, terrLayout = VK_NULL_HANDLE;
-    VkPipeline meshBlendPipe = VK_NULL_HANDLE, meshPipe = VK_NULL_HANDLE, terrPipe = VK_NULL_HANDLE, linePipe = VK_NULL_HANDLE, lineTopPipe = VK_NULL_HANDLE;
+    VkPipeline waterPipe = VK_NULL_HANDLE, meshBlendPipe = VK_NULL_HANDLE, meshPipe = VK_NULL_HANDLE, terrPipe = VK_NULL_HANDLE, linePipe = VK_NULL_HANDLE, lineTopPipe = VK_NULL_HANDLE;
     VkTex white, whiteArr;
     GpuMesh cube;
 
@@ -66,6 +66,9 @@ public:
     // translucent : seulement les parties sans texture d'eau, de fondu ou de verre (à dessiner après le reste) ;
     // sinon tout sauf elles
     void drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& texPerSub, bool translucent = false);
+    // (parties d'eau : leur carte de normales par partie, `signedNrm` si la carte est signée ; time en secondes)
+    void drawWater(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& nrm,
+                   const std::vector<char>& signedNrm, float time);
     void drawTerrain(VkCommandBuffer c, const PC& pc);
     void drawLines(VkCommandBuffer c, const PC& pc);
 

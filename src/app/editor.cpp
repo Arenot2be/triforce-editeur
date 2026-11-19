@@ -635,6 +635,26 @@ void Editor::render(VkCommandBuffer c) {
         }
     }
     if (!late.empty()) {
+        // (eau d'abord, avec sa carte de normales du jeu ; puis fondus et verre)
+        static const auto t0 = std::chrono::steady_clock::now();
+        float time = std::chrono::duration<float>(std::chrono::steady_clock::now() - t0).count();
+        time = std::fmod(time, 3600.f);
+        vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, rend.waterPipe);
+        std::vector<VkDescriptorSet> nrm;
+        std::vector<char> sgn;
+        for (auto& l : late) {
+            nrm.assign(l.g->subs.size(), VK_NULL_HANDLE);
+            sgn.assign(l.g->subs.size(), 0);
+            for (size_t i = 0; i < l.g->subs.size(); i++) {
+                if (l.g->subs[i].kind != 1 || l.g->subs[i].nrm.empty() || !showTextures) continue;
+                TexSlot* t = texture(l.g->subs[i].nrm);
+                if (t && (t->st == TexSlot::Ok || t->st == TexSlot::Mask) && t->tex.set) {
+                    nrm[i] = t->tex.set;
+                    sgn[i] = t->format.find("sign") != std::string::npos;
+                }
+            }
+            rend.drawWater(c, *l.g, l.pc, nrm, sgn, time);
+        }
         vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, rend.meshBlendPipe);
         std::vector<VkDescriptorSet> none;
         for (auto& l : late) rend.drawMesh(c, *l.g, l.pc, none, true);
@@ -867,7 +887,7 @@ TexSlot* Editor::texture(const std::string& name) {
             s2.reasons = r->st.why;
             s2.standIn = r->standIn;
             if (!r->why.empty()) { s2.st = TexSlot::None; s2.why = r->why; return; }
-            if (r->kind == 2) { s2.st = TexSlot::Mask; s2.why = "masque ou relief (" + r->t.format + ")"; return; }
+            bool mask = r->kind == 2;   // (BC4, BC5 : chargées quand même, pour les normales de l'eau)
             VkComponentSwizzle swz[4];
             static const VkComponentSwizzle MAP[6] = {VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ONE, VK_COMPONENT_SWIZZLE_R,
                                                       VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
@@ -881,17 +901,21 @@ TexSlot* Editor::texture(const std::string& name) {
                 case 2: f = VK_FORMAT_BC1_RGBA_UNORM_BLOCK; break;
                 case 3: f = VK_FORMAT_BC2_UNORM_BLOCK; break;
                 case 4: f = VK_FORMAT_BC3_UNORM_BLOCK; break;
+                case 5: f = r->t.format.find("sign") != std::string::npos ? VK_FORMAT_BC4_SNORM_BLOCK : VK_FORMAT_BC4_UNORM_BLOCK; break;
+                case 6: f = r->t.format.find("sign") != std::string::npos ? VK_FORMAT_BC5_SNORM_BLOCK : VK_FORMAT_BC5_UNORM_BLOCK; break;
                 case 7: f = VK_FORMAT_BC7_UNORM_BLOCK; break;
                 default: f = VK_FORMAT_R8G8B8A8_UNORM; data = r->rgba.data(); size = r->rgba.size(); mips = true; break;
             }
             if (r->t.code >= 2 && r->t.code <= 7 && !(vk.bc && vk.formatOk(f))) {
+                if (mask) { s2.st = TexSlot::Mask; s2.why = "masque ou relief (" + r->t.format + ")"; return; }
                 s2.st = TexSlot::None;
                 s2.why = "format " + r->t.format + " refusé par la carte graphique";
                 return;
             }
             try {
                 s2.tex = vk.texture(f, r->t.w, r->t.h, data, size, swz, mips);
-                s2.st = TexSlot::Ok;
+                s2.st = mask ? TexSlot::Mask : TexSlot::Ok;
+                if (mask) s2.why = "masque ou relief (" + r->t.format + ")";
             } catch (const std::exception& e) {
                 s2.st = TexSlot::None;
                 s2.why = e.what();

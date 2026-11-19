@@ -86,6 +86,9 @@ void Renderer::init() {
     meshBlendPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 20,
                              {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false,
                              false, true);
+    waterPipe = pipeline(SPV_WATER_VERT, sizeof SPV_WATER_VERT, SPV_WATER_FRAG, sizeof SPV_WATER_FRAG, 20,
+                         {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false,
+                         false, true);
     {
         VkDescriptorSetLayout sets[5] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout};
         VkPipelineLayoutCreateInfo tl = lc;
@@ -134,7 +137,7 @@ GpuMesh Renderer::upload(const Mesh& m) {
     g.vb = vk.upload(v.data(), v.size() * 4, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     g.ib = vk.upload(m.indices.data(), m.indices.size() * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     for (auto& s : m.subs) {
-        g.subs.push_back({s.start, s.count, s.tex, s.tex.empty() ? s.kind : 0});
+        g.subs.push_back({s.start, s.count, s.tex, s.tex.empty() ? s.kind : 0, s.nrm});
         if (s.tex.empty() && s.kind) g.translucent = true;
     }
     std::memcpy(g.bbox, m.bbox, sizeof g.bbox);
@@ -209,6 +212,7 @@ void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const
     vkCmdBindIndexBuffer(c, g.ib.buf, 0, VK_INDEX_TYPE_UINT32);
     for (size_t i = 0; i < g.subs.size(); i++) {
         if ((g.subs[i].kind != 0) != translucent) continue;
+        if (translucent && g.subs[i].kind == 1 && waterPipe) continue;   // (l'eau : drawWater)
         PC p = pc;
         if (translucent) {
             // (eau : bleu-vert ; fondu ou lumière : blanc très léger ; verre ou glace : bleu pâle)
@@ -218,6 +222,26 @@ void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const
         }
         VkDescriptorSet set = i < tex.size() && tex[i] ? tex[i] : white.set;
         p.scale[3] = set != white.set ? 1.f : 0.f;
+        vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
+        vkCmdPushConstants(c, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p);
+        vkCmdDrawIndexed(c, g.subs[i].count, 1, g.subs[i].start, 0, 0);
+    }
+}
+
+void Renderer::drawWater(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& nrm,
+                         const std::vector<char>& signedNrm, float time) {
+    if (!g.translucent || !waterPipe) return;
+    VkDeviceSize off = 0;
+    vkCmdBindVertexBuffers(c, 0, 1, &g.vb.buf, &off);
+    vkCmdBindIndexBuffer(c, g.ib.buf, 0, VK_INDEX_TYPE_UINT32);
+    for (size_t i = 0; i < g.subs.size(); i++) {
+        if (g.subs[i].kind != 1) continue;
+        PC p = pc;
+        // (couleur du fond : vert-bleu des rivières d'Hyrule ; a : temps)
+        p.color[0] = 0.06f; p.color[1] = 0.24f; p.color[2] = 0.27f; p.color[3] = time;
+        VkDescriptorSet set = i < nrm.size() && nrm[i] ? nrm[i] : white.set;
+        p.scale[3] = set != white.set ? 1.f : 0.f;
+        p.rot[3] = i < signedNrm.size() && signedNrm[i] ? 1.f : 0.f;
         vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
         vkCmdPushConstants(c, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p);
         vkCmdDrawIndexed(c, g.subs[i].count, 1, g.subs[i].start, 0, 0);
@@ -283,7 +307,7 @@ void Renderer::destroy() {
     free(cube);
     vk.free(white);
     vk.free(whiteArr);
-    for (auto p : {meshPipe, meshBlendPipe, terrPipe, linePipe, lineTopPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
+    for (auto p : {waterPipe, meshPipe, meshBlendPipe, terrPipe, linePipe, lineTopPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
     vkDestroyPipelineLayout(vk.dev, layout, nullptr);
     vkDestroyPipelineLayout(vk.dev, terrLayout, nullptr);
 }
