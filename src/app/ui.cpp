@@ -601,8 +601,11 @@ void viewport(Editor& ed) {
         ImGui::SameLine();
         float m = 1.f / ed.rend.terrUvScale;
         ImGui::SetNextItemWidth(70);
-        if (ImGui::DragFloat("##solm", &m, 0.05f, 0.5f, 50.f, "sol %.1f m")) ed.rend.terrUvScale = 1.f / std::max(0.5f, m);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nTaille d'une répétition des textures du sol (glisser pour régler)", ed.terrainMatStatus.c_str());
+        if (ImGui::DragFloat("##solm", &m, 0.01f, 0.1f, 10.f, "sol ×%.2f")) ed.rend.terrUvScale = 1.f / std::max(0.1f, m);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s\n%s\nTaille des textures du sol par rapport au jeu (glisser pour régler ; ×1 : celle du jeu)", ed.terrainMatStatus.c_str(),
+                              ed.terrainMatTable ? fmt("%zu matières décrites par la scène", ed.terrainMatTable).c_str()
+                                                 : "pas de table des matières : 4 m par répétition");
     }
     ImGui::SameLine();
     ImGui::Checkbox("Incliner", &ed.tilt);

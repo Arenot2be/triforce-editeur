@@ -1,5 +1,6 @@
 // Rendu Vulkan de la vue 3D : modèles (texturés ou non), boîtes, terrain, lignes.
 #pragma once
+#include <array>
 #include <string>
 #include <vector>
 
@@ -50,9 +51,11 @@ public:
     void setTerrain(const std::vector<TerrVert>& v, const std::vector<uint32_t>& idx, const std::vector<uint8_t>& ids = {},
                     const std::vector<uint8_t>& wts = {}, int grid = 0, int tiles = 0);
     // textures des matières du sol (RGBA8 ou format compressé lu par la carte graphique), une couche par matière
-    VkTex terrAlb, terrIds, terrWts;
+    VkTex terrAlb, terrIds, terrWts, terrMat;
     int terrLayers = 0;
-    float terrUvScale = 0.25f;   // (répétitions par mètre)
+    float terrUvScale = 1.f;   // (multiplie les répétitions du jeu)
+    // table des matières : par numéro, couche de MaterialAlb et répétitions u, v par mètre
+    void setTerrainTable(const std::vector<std::array<float, 3>>& t);
     void setTerrainMaterials(VkFormat f, int w, int h, int layers, const void* data, size_t size);
 
     // lignes de la trame (grille, sélection) ; top : par-dessus tout

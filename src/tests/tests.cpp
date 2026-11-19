@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
         } else if (cmd == "mc") {   // .bfres.mc -> BFRES et tampons décodés
             out(meshCodecUnpack(readFile(u8path(argv[2]))), argv[3]);
         } else if (cmd == "bntx") {
-            TexData t = bntxExtract(readFile(u8path(argv[2])), 512, argc > 4 ? argv[4] : "");
+            TexData t = bntxExtract(readFile(u8path(argv[2])), std::getenv("TE_MAX") ? std::atoi(std::getenv("TE_MAX")) : 512, argc > 4 ? argv[4] : "", std::getenv("TE_LAYER") ? std::atoi(std::getenv("TE_LAYER")) : 0);
             std::printf("%d %d %d %d %08x\n", t.code, t.w, t.h, t.srgb ? 1 : 0, t.compSel);
             out(t.blocks, argv[3]);
         } else if (cmd == "zs") {   // romfs fichier -> décompressé
@@ -103,6 +103,12 @@ int main(int argc, char** argv) {
             for (auto& t : tiles) for (float h : t.h) if (h == h) sum += h;
             std::printf("%zu tuiles, n=%d, somme %.3f, centre %.3f %.3f %.3f\n", tiles.size(), tiles.empty() ? 0 : tiles[0].n, sum,
                         tiles.empty() ? 0 : tiles[0].cx, tiles.empty() ? 0 : tiles[0].cz, tiles.empty() ? 0 : tiles[0].side);
+            if (std::getenv("TE_MAT")) {
+                auto mats = terrainMaterials(g, argv[3]);
+                std::printf("%zu matières :", mats.size());
+                for (size_t k = 0; k < mats.size() && k < 16; k++) std::printf(" %d:%g", mats[k].layer, mats[k].u);
+                std::printf("\n");
+            }
             if (std::getenv("TE_MAT") && !tiles.empty() && !tiles[0].ids.empty()) {   // (matières de la première tuile)
                 auto& t = tiles[0];
                 for (int y = 0; y < t.n; y += t.n / 4)

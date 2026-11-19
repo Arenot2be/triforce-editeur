@@ -172,6 +172,7 @@ public:
     std::string terrainStatus;
     std::string terrainMatStatus;   // (textures du sol : Tex/MaterialAlb)
     bool terrainMatAsked = false;
+    size_t terrainMatTable = 0;   // (matières décrites par le .tscb de la scène)
     void setTerrain(const std::string& scene);
     void loadTerrainMaterials();
     std::string autoTerrain() const;

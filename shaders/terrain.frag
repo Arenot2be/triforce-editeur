@@ -7,19 +7,24 @@
 layout(set = 0, binding = 0) uniform sampler2DArray uAlb;
 layout(set = 1, binding = 0) uniform sampler2DArray uIds;
 layout(set = 2, binding = 0) uniform sampler2DArray uWts;
+layout(set = 3, binding = 0) uniform sampler2DArray uMat;   // (128 x 1 : par matière, couche, répétitions u et v par mètre × 64)
 layout(location = 0) in vec4 vCol;
 layout(location = 1) in vec3 vW;
 layout(location = 2) in vec3 vTc;
 layout(location = 0) out vec4 outColor;
 
-vec4 point(ivec3 p, vec2 uv, vec2 gx, vec2 gy) {   // (couleur pondérée, somme des poids des matières connues)
+vec4 point(ivec3 p, vec2 w2, vec2 gx, vec2 gy) {   // (couleur pondérée, somme des poids des matières connues ; w2 : x, z en mètres × réglage)
     vec4 id = texelFetch(uIds, p, 0) * 255.0;
     vec4 w = texelFetch(uWts, p, 0);
     vec4 c = vec4(0.0);
     for (int k = 0; k < 4; k++) {
         float m = floor(id[k] + 0.5);
-        if (w[k] <= 0.0 || m >= 127.0 || m >= pc.scale.y) continue;
-        c += w[k] * vec4(textureGrad(uAlb, vec3(uv, m), gx, gy).rgb   /* (gradients calculés hors des branches) */, 1.0);
+        if (w[k] <= 0.0 || m >= 127.0) continue;
+        vec4 info = texelFetch(uMat, ivec3(int(m), 0, 0), 0) * 255.0;
+        float layer = floor(info.r + 0.5);
+        if (layer >= pc.scale.y) continue;
+        vec2 rep = info.gb / 64.0;
+        c += w[k] * vec4(textureGrad(uAlb, vec3(w2 * rep, layer), gx * rep, gy * rep).rgb   /* (gradients calculés hors des branches) */, 1.0);
     }
     return c;
 }
@@ -35,7 +40,7 @@ void main() {
         ivec2 i0 = ivec2(min(floor(f), vec2(g - 1.0)));
         vec2 a = f - vec2(i0);
         int layer = int(vTc.z + 0.5);
-        vec2 uv = vW.xz * pc.scale.x;
+        vec2 uv = vW.xz * pc.scale.x;   // (pc.scale.x : réglage, 1 = valeurs du jeu)
         vec2 gx = dFdx(uv), gy = dFdy(uv);
         vec4 c = point(ivec3(i0, layer), uv, gx, gy) * (1.0 - a.x) * (1.0 - a.y) + point(ivec3(i0 + ivec2(1, 0), layer), uv, gx, gy) * a.x * (1.0 - a.y) +
                  point(ivec3(i0 + ivec2(0, 1), layer), uv, gx, gy) * (1.0 - a.x) * a.y + point(ivec3(i0 + ivec2(1, 1), layer), uv, gx, gy) * a.x * a.y;

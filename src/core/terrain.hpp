@@ -16,6 +16,11 @@ struct TerrainTile {
 };
 
 std::vector<std::string> terrainScenes(const Game& game);
+
+// Table des matières du .tscb : pour la matière k des .mate, sa couche de Tex/MaterialAlb et ses répétitions par
+// mètre (u, v). Vide si introuvable.
+struct TerrainMaterial { int layer = 0; float u = 0.25f, v = 0.25f; };
+std::vector<TerrainMaterial> terrainMaterials(const Game& game, const std::string& scene);
 std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene, int budget = 1600);
 
 }  // namespace te

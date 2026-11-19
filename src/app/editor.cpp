@@ -930,7 +930,8 @@ static std::array<float, 3> matColor(int m, float) {
 }
 
 // Textures du sol : Tex/MaterialAlb.bntx.zs, une texture en tableau dont la couche k est la matière k des .mate.
-// Lue une fois (niveau de mip ≤ 256 pixels), décodée sur le processeur si ASTC.
+// Lue une fois (niveau de mip ≤ 512 pixels), décodée sur le processeur si ASTC. La table des matières du .tscb
+// donne pour chaque numéro sa couche et ses répétitions par mètre.
 void Editor::loadTerrainMaterials() {
     if (terrainMatAsked || !game) return;
     terrainMatAsked = true;
@@ -943,7 +944,7 @@ void Editor::loadTerrainMaterials() {
             std::string rel = g->texFile("MaterialAlb");
             if (rel.empty()) throw Error("Tex/MaterialAlb.bntx.zs introuvable");
             Bytes raw = g->read(rel);
-            TexData t0 = bntxExtract(raw, 256, "", 0);
+            TexData t0 = bntxExtract(raw, 512, "", 0);
             r->layers = t0.layers;
             r->w = t0.w;
             r->h = t0.h;
@@ -959,7 +960,7 @@ void Editor::loadTerrainMaterials() {
                 }
             }
             for (int L = 0; L < r->layers; L++) {
-                TexData t = L ? bntxExtract(raw, 256, "", L) : t0;
+                TexData t = L ? bntxExtract(raw, 512, "", L) : t0;
                 if (t.w != r->w || t.h != r->h) throw Error("couches de tailles différentes");
                 if (astc) {
                     int i = t.code - 20;
@@ -1001,8 +1002,10 @@ void Editor::setTerrain(const std::string& scene) {
         auto ii = std::make_shared<std::vector<uint32_t>>();
         auto ids = std::make_shared<std::vector<uint8_t>>(), wts = std::make_shared<std::vector<uint8_t>>();
         auto grid = std::make_shared<int>(0);
+        auto table = std::make_shared<std::vector<std::array<float, 3>>>();
         std::string why;
         try {
+            for (auto& m : terrainMaterials(*g, scene)) table->push_back({float(m.layer), m.u, m.v});
             *tl = terrainBuild(*g, scene);
             bool allMat = !tl->empty();
             for (auto& t : *tl) { *grid = std::max(*grid, t.n); if (t.ids.empty()) allMat = false; }
@@ -1048,12 +1051,14 @@ void Editor::setTerrain(const std::string& scene) {
         } catch (const std::exception& e) {
             why = e.what();
         }
-        return [this, scene, tl, vv, ii, ids, wts, grid, why] {
+        return [this, scene, tl, vv, ii, ids, wts, grid, table, why] {
             if (terrainScene != scene) return;
             if (!why.empty()) { terrainStatus = "terrain illisible : " + why; return; }
             size_t nt = tl->size();
             tiles = std::move(*tl);
             rend.setTerrain(*vv, *ii, *ids, *wts, *grid, int(nt));
+            rend.setTerrainTable(*table);
+            terrainMatTable = table->size();
             terrainStatus = fmt("%zu tuiles", tiles.size());
         };
     });

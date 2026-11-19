@@ -117,6 +117,42 @@ void tarb(const Bytes& raw, Bytes& data, std::vector<std::pair<size_t, size_t>>&
 }
 }  // namespace
 
+// (en-tête : nombre de matières à 0x34, décalage relatif de leur table à 0x74 ; chaque entrée, désignée par un
+// décalage relatif : u32 couche, 3 float, puis les répétitions u et v par mètre)
+static std::vector<TerrainMaterial> tscbMaterials(const Bytes& b) {
+    std::vector<TerrainMaterial> out;
+    if (b.size() < 0x80) return out;
+    uint32_t count = rd32(b, 0x34);
+    auto tryTable = [&](size_t table) {
+        std::vector<TerrainMaterial> r;
+        for (uint32_t k = 0; k < count; k++) {
+            size_t p = table + 4 * size_t(k);
+            if (p + 4 > b.size()) return std::vector<TerrainMaterial>{};
+            size_t e = p + rd32(b, p);
+            if (e + 24 > b.size()) return std::vector<TerrainMaterial>{};
+            TerrainMaterial m;
+            m.layer = int(rd32(b, e));
+            m.u = rdf(b, e + 16);
+            m.v = rdf(b, e + 20);
+            if (m.layer < 0 || m.layer > 1024 || !(m.u > 0 && m.u < 100) || !(m.v > 0 && m.v < 100)) return std::vector<TerrainMaterial>{};
+            r.push_back(m);
+        }
+        return r;
+    };
+    if (!count || count > 1024) return out;
+    out = tryTable(0x74 + rd32(b, 0x74));
+    for (size_t o = 0x60; out.empty() && o < 0x100; o += 4) out = tryTable(o + rd32(b, o));
+    return out;
+}
+
+std::vector<TerrainMaterial> terrainMaterials(const Game& game, const std::string& scene) {
+    try {
+        return tscbMaterials(readFile(game.path("TerrainArc") / u8path(scene + ".tscb")));
+    } catch (...) {
+        return {};
+    }
+}
+
 std::vector<std::string> terrainScenes(const Game& game) {
     std::vector<std::string> out;
     fs::path root = game.path("TerrainArc");
