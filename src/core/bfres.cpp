@@ -241,9 +241,12 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
     uint32_t count = rd32(d, hdr + 20);
     size_t recSize = 8 * size_t(4 + std::popcount(flags & 0xC00u) + std::popcount(flags & 0x1F000u));
     size_t base = hdr + 84;
-    int n2d = (flags & 0xC00u) ? 0 : std::popcount(flags & 0x1F000u);   // (attributs des bits 0xC00 : disposition inconnue)
+    // (les mots des bits 0xC00, sans doute la couleur des sommets, suivent ceux des attributs à 2 composantes ; leurs
+    // bits par sommet, s'il y en a, viennent après les coordonnées de texture : vu avec 0 bit, donc supposé)
+    int n2d = std::popcount(flags & 0x1F000u);
+    bool extra = (flags & 0xC00u) != 0;
     bool uvOk = n2d > 0;
-    if (!uvOk) uvWhy = (flags & 0xC00u) ? fmt("disposition des sommets inconnue (drapeaux %#x)", flags) : fmt("pas de coordonnées de texture (drapeaux %#x)", flags);
+    if (!uvOk) uvWhy = fmt("pas de coordonnées de texture (drapeaux %#x)", flags);
     if (!count || base + recSize * count > end) throw Error("meshlets : descripteurs hors du tampon");
     size_t bits = (end - base) * 8;
     auto rd = [&](size_t bp, unsigned w) -> uint32_t {
@@ -280,7 +283,7 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
             }
             total += a + c;
         }
-        bool hasUv = uvOk && total == stride;
+        bool hasUv = uvOk && (extra ? total <= stride : total == stride);
         for (unsigned i = 0; i < vc; i++) {
             size_t p = start + size_t(i) * stride;
             for (int a = 0; a < 3; a++) {
