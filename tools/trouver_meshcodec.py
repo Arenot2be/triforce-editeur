@@ -74,6 +74,22 @@ def find_constants(code):
     return hits
 
 
+def find_magicless(code):
+    """(appels de ZSTD_DCtx_setParameter(dctx, ZSTD_d_format = 1000, magicless = 1) : le conteneur .bfres.mc est
+    le seul du jeu à utiliser des trames zstd sans nombre magique)"""
+    hits = []
+    for lo, hi, mod in code.ranges:
+        ws = code.words(lo, hi)
+        for i, w in enumerate(ws):
+            if (w & 0x7FFFFFFF) != 0x52807D01:   # (mov w1, #1000)
+                continue
+            for j in range(max(0, i - 6), min(i + 7, len(ws))):
+                if (ws[j] & 0x7FFFFFFF) == 0x52800022:   # (mov w2, #1)
+                    hits.append(lo + 4 * i)
+                    break
+    return hits
+
+
 def find_text_refs(code):
     """(textes cherchés dans tout le programme, et le code qui en calcule l'adresse : adrp + add)"""
     found = []
@@ -255,7 +271,12 @@ def run(code, out):
     out.write("\n== code qui lit ces tables : %d\n" % len(trefs))
     for pc, label in trefs:
         out.write("  %#x %s  (dans %s)\n" % (pc, label, name_of(code, pc, True)))
+    ml = find_magicless(code)
+    out.write("\n== réglages zstd « sans nombre magique » (format du .bfres.mc) : %d\n" % len(ml))
+    for pc in ml:
+        out.write("  %#x  (dans %s)\n" % (pc, name_of(code, pc, True)))
     marks = {pc: n for pc, n in hits}
+    marks.update({pc: "zstd sans nombre magique (MeshCodec)" for pc in ml})
     marks.update({pc: "texte « %s »" % t for pc, t in refs})
     marks.update({pc: label for pc, label in trefs if "zstd" not in label})
     # (qui appelle ces fonctions, en remontant : c'est là que le conteneur .bfres.mc est lu)
