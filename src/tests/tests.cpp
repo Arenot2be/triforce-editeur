@@ -1,5 +1,6 @@
 // Outil de vérification des formats (comparé au modkit Python par tests/compare.py).
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 
 #include "core/astc.hpp"
@@ -45,6 +46,12 @@ int main(int argc, char** argv) {
             for (float f : m.uvs) sum += f;
             for (uint32_t i : m.indices) sum += i;
             std::printf(" %.3f\n", sum);
+            if (const char* obj = std::getenv("TE_OBJ")) {   // (export OBJ pour vérifier à l'œil)
+                FILE* o = std::fopen(obj, "w");
+                for (size_t k = 0; k + 2 < m.positions.size(); k += 3) std::fprintf(o, "v %f %f %f\n", m.positions[k], m.positions[k + 1], m.positions[k + 2]);
+                for (size_t k = 0; k + 2 < m.indices.size(); k += 3) std::fprintf(o, "f %u %u %u\n", m.indices[k] + 1, m.indices[k + 1] + 1, m.indices[k + 2] + 1);
+                std::fclose(o);
+            }
         } else if (cmd == "mc") {   // .bfres.mc -> BFRES et tampons décodés
             out(meshCodecUnpack(readFile(u8path(argv[2]))), argv[3]);
         } else if (cmd == "bntx") {

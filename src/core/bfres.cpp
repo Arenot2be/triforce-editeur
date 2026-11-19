@@ -211,6 +211,70 @@ std::vector<std::array<double, 4>> attrValues(const R& r, const Buf& b, const At
     return out;
 }
 
+// Géométrie en meshlets (formes au drapeau 0x10), telle que la lisent les mesh shaders du jeu. En-tête (à l'endroit
+// du tampon désigné par le maillage) : boîte min (3 float), pas de quantification (float), un mot de drapeaux, puis
+// 16 compteurs cumulés de meshlets par niveau de détail. Suivent, à +84, un descripteur par meshlet de
+// 8 × (4 + bits 10-11 + bits 12-16 des drapeaux) octets :
+//   +0  (64 bits) bases entières de x, y, z (21 bits chacune)
+//   +16 octet 2 : triangles, octet 3 : sommets ; +20 : (début des sommets en octets depuis +84) << 4
+//   +24 (64 bits) bits 0-9 : bits par sommet ; 16-20, 21-25, 26-30 : largeurs de x, y, z
+// Chaque sommet commence par x, y, z (entiers non signés ; position = (entier + base) × pas + min) ; les triangles
+// suivent les sommets, 3 index de (bits nécessaires pour « sommets - 1 ») bits chacun. Seul le niveau 0 est lu.
+void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>& pos, std::vector<uint32_t>& idx) {
+    if (hdr + 84 > end || end > d.size()) throw Error("meshlets : en-tête hors du tampon");
+    float mn[3] = {rdf(d, hdr), rdf(d, hdr + 4), rdf(d, hdr + 8)}, step = rdf(d, hdr + 12);
+    uint32_t flags = rd32(d, hdr + 16);
+    if (!(step > 1e-7f && step < 1.f) || !std::isfinite(mn[0]) || !std::isfinite(mn[1]) || !std::isfinite(mn[2]))
+        throw Error(fmt("meshlets : en-tête incohérent (pas %g)", double(step)));
+    uint32_t prev = 0;
+    for (int k = 0; k < 16; k++) {
+        uint32_t c = rd32(d, hdr + 20 + 4 * size_t(k));
+        if (c < prev || c > 65536) throw Error("meshlets : table des niveaux incohérente");
+        prev = c;
+    }
+    uint32_t count = rd32(d, hdr + 20);
+    size_t recSize = 8 * size_t(4 + __builtin_popcount(flags & 0xC00u) + __builtin_popcount(flags & 0x1F000u));
+    size_t base = hdr + 84;
+    if (!count || base + recSize * count > end) throw Error("meshlets : descripteurs hors du tampon");
+    size_t bits = (end - base) * 8;
+    auto rd = [&](size_t bp, unsigned w) -> uint32_t {
+        if (bp + w > bits) throw Error("meshlets : données hors du tampon");
+        size_t o = base + (bp >> 3);
+        uint64_t v = 0;
+        for (size_t k = 0; k < 8 && o + k < end; k++) v |= uint64_t(d[o + k]) << (8 * k);
+        return uint32_t((v >> (bp & 7)) & ((1ull << w) - 1));
+    };
+    for (uint32_t m = 0; m < count; m++) {
+        size_t rec = base + recSize * m;
+        uint64_t q = rd64(d, rec), s = rd64(d, rec + 24);
+        uint32_t w4 = rd32(d, rec + 16), w5 = rd32(d, rec + 20);
+        uint32_t qb[3] = {uint32_t(q & 0x1FFFFF), uint32_t((q >> 21) & 0x1FFFFF), uint32_t((q >> 42) & 0x1FFFFF)};
+        unsigned stride = unsigned(s & 0x3FF), ww[3] = {unsigned((s >> 16) & 31), unsigned((s >> 21) & 31), unsigned((s >> 26) & 31)};
+        unsigned vc = (w4 >> 24) & 255, pc = (w4 >> 16) & 255;
+        if (!vc || !pc) continue;
+        if (ww[0] + ww[1] + ww[2] > stride) throw Error(fmt("meshlets : meshlet %u incohérent", m));
+        unsigned ib = 1;
+        while ((1u << ib) < vc) ib++;
+        size_t start = size_t(w5 >> 4) * 8;
+        uint32_t first = uint32_t(pos.size() / 3);
+        for (unsigned i = 0; i < vc; i++) {
+            size_t p = start + size_t(i) * stride;
+            for (int a = 0; a < 3; a++) {
+                pos.push_back((double(rd(p, ww[a])) + qb[a]) * step + mn[a]);
+                p += ww[a];
+            }
+        }
+        size_t t0 = start + size_t(vc) * stride;
+        for (unsigned t = 0; t < pc; t++) {
+            size_t p = t0 + size_t(t) * 3 * ib;
+            uint32_t a = rd(p, ib), b = rd(p + ib, ib), c = rd(p + 2 * ib, ib);
+            if (a >= vc || b >= vc || c >= vc) throw Error(fmt("meshlets : index hors limites (meshlet %u)", m));
+            idx.push_back(first + a); idx.push_back(first + b); idx.push_back(first + c);
+        }
+    }
+    if (idx.empty()) throw Error("meshlets : aucun triangle");
+}
+
 void vertexBuffer(const R& r, size_t vb, size_t bufferOffset, std::vector<Attr>& attrs, std::vector<Buf>& bufs, size_t& count) {
     if (!r.magic(vb, "FVTX")) throw Error("FVTX attendu");
     int nAttr = r.u8(vb + 0x4C), nBuf = r.u8(vb + 0x4D);
@@ -320,7 +384,7 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     uint8_t flags = r.u8(0xEE);
     uint32_t fileSize = r.u32(0x1C);
     Mesh m;
-    size_t bufferOffset;
+    size_t bufferOffset, bufferSize = 0;
     if (flags & (1 << 3)) {
         if (data.size() <= fileSize) throw Error(fmt("données graphiques dans un fichier séparé (drapeau %#x)", flags));
         // (tampons décodés par MeshCodec : leur décalage est écrit à Align(taille, 8), voir meshcodec.cpp)
@@ -333,7 +397,9 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
         uint64_t bo = r.u64(bi + 8);
         if (!(bo > 0 && bo < data.size())) throw Error("BufferInfo hors du fichier");
         bufferOffset = size_t(bo);
+        bufferSize = r.u32(bi + 4);
     }
+    if (!bufferSize || bufferOffset + bufferSize > data.size()) bufferSize = data.size() - bufferOffset;
     size_t modelsP = r.ptr(0x28);
     int nModels = r.dictCount(0x30);
     if (!nModels) nModels = r.u16(0xDC);
@@ -367,7 +433,35 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
         size_t sh = shapesP + size_t(si) * sStride;
         try {
             // (drapeau 0x10 : géométrie en meshlets, décodée sur la carte graphique par les mesh shaders du jeu)
-            if (r.u8(sh + 4) & 0x10) throw Error(MESHLETS);
+            if (r.u8(sh + 4) & 0x10) {
+                size_t meshP = r.ptr(sh + 0x18), arr = meshP ? r.ptr(meshP + 0x18) : 0;
+                if (!meshP) throw Error(std::string(MESHLETS) + " : maillage absent");
+                size_t hdr = bufferOffset + (arr ? r.u32(arr) : 0);
+                std::vector<double> pts;
+                std::vector<uint32_t> ids;
+                meshletGeometry(data, hdr, std::min(data.size(), bufferOffset + bufferSize), pts, ids);
+                size_t tail = sh + 0x50;
+                int bone = r.u16(tail + 4), skin = r.u8(tail + 10);
+                const M34* M = skin == 0 && size_t(bone) < world.size() ? &world[size_t(bone)] : nullptr;
+                if (tris + ids.size() / 3 > maxTriangles) { m.skipped.push_back(fmt("forme %d : trop de triangles", si)); continue; }
+                uint32_t base = uint32_t(m.positions.size() / 3), ibase = uint32_t(m.indices.size());
+                for (size_t k = 0; k + 2 < pts.size(); k += 3) {
+                    double x = pts[k], y = pts[k + 1], z = pts[k + 2];
+                    if (M) {
+                        const M34& W = *M;
+                        double nx = W[0] * x + W[1] * y + W[2] * z + W[3], ny = W[4] * x + W[5] * y + W[6] * z + W[7], nz = W[8] * x + W[9] * y + W[10] * z + W[11];
+                        x = nx; y = ny; z = nz;
+                    }
+                    m.positions.push_back(float(x)); m.positions.push_back(float(y)); m.positions.push_back(float(z));
+                    m.uvs.push_back(0.f); m.uvs.push_back(0.f);
+                }
+                for (uint32_t v : ids) m.indices.push_back(base + v);
+                m.subs.push_back({ibase, uint32_t(m.indices.size()) - ibase, ""});   // (coordonnées de texture pas encore lues)
+                tris += ids.size() / 3;
+                m.shapes++;
+                m.meshletShapes++;
+                continue;
+            }
             auto [vo, vb] = findPtr(r, sh, 0x40, "FVTX");
             if (!vb) {
                 vo = sh + 0x10;

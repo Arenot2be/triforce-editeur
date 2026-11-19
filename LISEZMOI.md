@@ -49,10 +49,11 @@ Le compteur « illisibles » ouvre la liste des textures qui n'ont pas pu être 
 Les modèles `.bfres.mc` (format « MeshCodec » : BFRES compressé, tampons de sommets et d'index encodés) sont
 décodés avec le code de [dt-12345/MeshCodec](https://github.com/dt-12345/MeshCodec).
 
-Restent des boîtes les modèles dont la géométrie est en **meshlets** (environ 12 %, surtout falaises, rochers et
-salles) : le jeu les décode sur la carte graphique, dans ses mesh shaders, dans un format qui n'est pas documenté.
-Le panneau de sélection l'indique et propose « Exporter ce modèle pour analyse », qui écrit le modèle décompressé
-dans `Documents\Triforce-modkit\analyse` (pour ton usage : ne le partage pas publiquement).
+Les modèles dont la géométrie est en **meshlets** (environ 12 %, surtout falaises, rochers, clôtures et salles ; le
+jeu les décode sur la carte graphique, dans ses mesh shaders) sont lus aussi : positions et triangles du niveau de
+détail le plus fin. Leurs coordonnées de texture ne sont pas encore lues : ils s'affichent en blanc ombré.
+Pour un modèle illisible, le panneau de sélection propose « Exporter ce modèle pour analyse », qui écrit le modèle
+décompressé dans `Documents\Triforce-modkit\analyse` (pour ton usage : ne le partage pas publiquement).
 
 ## Compiler soi-même
 
