@@ -35,12 +35,21 @@ public:
     // (texture voisine d'une texture absent du jeu, de la même famille de noms : Insect_C -> Insect_A,
     //  GraphicVine_A_01 -> GraphicVine_A_00… ; {nom, fichier}, ou {"", ""} si aucune n'est assez proche)
     std::pair<std::string, std::string> similarTex(const std::string& name);
+    // (textures trouvées par la recherche approfondie, rangées hors de Tex/ : « fichier|membre…|@octet » ;
+    //  gardées dans Documents\Triforce-modkit\cache\textures-trouvees.txt)
+    void addFound(const std::string& name, const std::string& loc);
+    // (le contenu d'un fichier donné par texFile : un fichier de Tex/, ou une texture rangée ailleurs)
+    Bytes readTex(const std::string& loc) const;
+    std::vector<std::string> allFiles();
 
 private:
     void buildTexIndex();
     std::mutex m_, texM_;
     bool texIndexed_ = false;
     std::map<std::string, std::string> texIndex_;   // (nom en minuscules -> chemin)
+    bool foundLoaded_ = false;
+    std::map<std::string, std::string> found_;   // (nom en minuscules -> emplacement)
+    void loadFound();
     bool allListed_ = false;
     std::vector<std::string> all_;   // (tous les fichiers du romfs, chemins relatifs)
     std::map<std::string, std::shared_ptr<const Sarc>> packs_;

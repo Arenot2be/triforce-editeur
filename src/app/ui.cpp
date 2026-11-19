@@ -57,6 +57,7 @@ struct UiState {
     std::string propsVal;       // (valeur affichée la dernière fois : pour voir les changements faits ailleurs)
     std::string propsErr;
     bool keepYaw = true;
+    bool showSearch = false;
     bool showHelp = false, showFolders = false, showBuild = false, showTex = false, showMdl = false, askRevert = false, askSave = false, askQuit = false;
     std::string romfs, work, mods;
     bool viewHovered = false;
@@ -113,6 +114,32 @@ std::string modelStandIns(Editor& ed, const ModelSlot& s) {
             out += "\n    " + sb.tex + " (absente du jeu) -> " + it->second.standIn;
     }
     return out.empty() ? out : out + "\n";
+}
+
+// (bouton « chercher dans tout le jeu », ou l'avancement de la recherche en cours)
+void searchButton(Editor& ed) {
+    auto s = ed.texSearch;
+    if (s && !s->finished) {
+        size_t t = std::max<size_t>(1, s->total);
+        ImGui::Text("Recherche : %zu / %zu fichiers (%.1f Go)", s->done.load(), s->total.load(), double(s->bytes.load()) / 1e9);
+        ImGui::SameLine();
+        ImGui::ProgressBar(float(s->done.load()) / float(t), {160, 0});
+        ImGui::SameLine();
+        if (ImGui::Button("Arrêter")) s->cancel = true;
+        return;
+    }
+    auto miss = ed.missingTextures();
+    ImGui::BeginDisabled(miss.empty());
+    if (ImGui::Button(fmt("Chercher les %zu textures introuvables dans tout le jeu", miss.size()).c_str())) ed.startTexSearch();
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Décompresse chaque fichier du jeu (et chaque membre des archives) pour y chercher ces noms\n"
+                          "et toute texture qui les porte, où qu'elle soit rangée. Plusieurs minutes.\n"
+                          "Les textures trouvées sont ensuite affichées et retenues pour les prochaines fois.");
+    if (!ed.texSearchReport.empty()) {
+        ImGui::SameLine();
+        if (ImGui::Button("Dernier rapport")) U.showSearch = true;
+    }
 }
 
 void tryOpen(Editor& ed, const std::string& rel) {
@@ -768,6 +795,8 @@ void dialogs(Editor& ed, bool& quit) {
             ed.say(fmt("%d textures copiées dans le presse-papiers", count));
         }
         ImGui::SameLine();
+        searchButton(ed);
+        ImGui::SameLine();
         if (ImGui::Button("Fermer")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
@@ -801,6 +830,19 @@ void dialogs(Editor& ed, bool& quit) {
             ImGui::SetClipboardText(all.c_str());
             ed.say(fmt("%d modèles copiés dans le presse-papiers", na + nb));
         }
+        ImGui::SameLine();
+        searchButton(ed);
+        ImGui::SameLine();
+        if (ImGui::Button("Fermer")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    if (ed.pollTexSearch()) U.showSearch = true;
+    modal("Recherche des textures dans tout le jeu", U.showSearch);
+    if (ImGui::BeginPopupModal("Recherche des textures dans tout le jeu", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        std::string r = ed.texSearchReport;
+        ImGui::TextDisabled("Aussi écrit dans Documents\\Triforce-modkit\\analyse\\recherche-textures.txt");
+        ImGui::InputTextMultiline("##rech", &r, {900, 440}, ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::Button("Tout copier")) { ImGui::SetClipboardText(r.c_str()); ed.say("Rapport copié dans le presse-papiers"); }
         ImGui::SameLine();
         if (ImGui::Button("Fermer")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();

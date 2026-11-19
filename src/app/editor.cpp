@@ -97,6 +97,8 @@ Editor::Editor(Vk& v, Renderer& r) : vk(v), rend(r) {
     loadSettings();
 }
 Editor::~Editor() {
+    if (texSearch) texSearch->cancel = true;
+    if (searchThread_.joinable()) searchThread_.join();
     if (buildThread_.joinable()) buildThread_.join();
     jobs.clear();
 }
@@ -810,7 +812,7 @@ void Editor::exportModel(const std::string& actor) {
                 std::string t = game->texFile(sb.tex);
                 if (t.empty()) continue;
                 try {
-                    writeFileAtomic(dir / u8path(sb.tex + ".bntx"), game->read(t));
+                    writeFileAtomic(dir / u8path(sb.tex + ".bntx"), game->readTex(t));
                     nt++;
                 } catch (...) {}
             }
@@ -843,7 +845,7 @@ TexSlot* Editor::texture(const std::string& name) {
                 throw Error("introuvable : ni Tex/" + name + ".bntx.zs, ni dans un autre fichier de Tex/" +
                             (where.empty() ? std::string(" ; aucun fichier du jeu ne porte ce nom") : " ; fichiers à ce nom : " + where));
             }
-            r->t = bntxExtract(g->read(rel), 512, want);
+            r->t = bntxExtract(g->readTex(rel), 512, want);
             if (r->t.code == 5 || r->t.code == 6) r->kind = 2;   // (BC4, BC5 : masques ou reliefs, pas des couleurs)
             else if (r->t.code == 8) throw Error("format BC6H (HDR) non affiché");
             else if (r->t.code >= 20) {
@@ -897,6 +899,51 @@ TexSlot* Editor::texture(const std::string& name) {
         };
     });
     return &s;
+}
+
+// ---------------------------------------------------------------- recherche approfondie des textures
+std::vector<std::string> Editor::missingTextures() const {
+    std::vector<std::string> v;
+    for (auto& [n, t] : texSlots)
+        if ((t.st == TexSlot::None && t.why.rfind("introuvable", 0) == 0) || (t.st == TexSlot::Ok && !t.standIn.empty())) v.push_back(n);
+    return v;
+}
+
+void Editor::startTexSearch() {
+    if (!game || (texSearch && !texSearch->finished)) return;
+    auto names = missingTextures();
+    if (names.empty()) { say("Aucune texture introuvable à chercher"); return; }
+    if (searchThread_.joinable()) searchThread_.join();
+    texSearch = std::make_shared<TexSearch>();
+    texSearch->names = names;
+    texSearchReport.clear();
+    auto s = texSearch;
+    Game* g = game.get();
+    int th = int(std::max(2u, std::min(12u, std::thread::hardware_concurrency())));
+    searchThread_ = std::thread([g, s, th] { try { searchTextures(*g, *s, th); } catch (...) { s->finished = true; } });
+    say(fmt("Recherche de %zu textures dans tout le jeu…", names.size()));
+}
+
+bool Editor::pollTexSearch() {
+    if (!texSearch || !texSearch->finished || !texSearchReport.empty()) return false;
+    if (searchThread_.joinable()) searchThread_.join();
+    int got = 0;
+    {
+        std::lock_guard<std::mutex> lk(texSearch->m);
+        texSearchReport = texSearch->report();
+        for (size_t k = 0; k < texSearch->names.size(); k++)
+            if (k < texSearch->usable.size() && !texSearch->usable[k].empty()) {
+                game->addFound(texSearch->names[k], texSearch->usable[k][0]);
+                texSlots.erase(texSearch->names[k]);   // (rechargée avec la vraie texture)
+                got++;
+            }
+    }
+    fs::path dir = homeDir() / u8path("Documents") / u8path("Triforce-modkit") / u8path("analyse");
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    try { writeFileAtomic(dir / u8path("recherche-textures.txt"), Bytes(texSearchReport.begin(), texSearchReport.end())); } catch (...) {}
+    say(fmt("Recherche terminée : %d texture(s) retrouvée(s) sur %zu", got, texSearch->names.size()), got == 0);
+    return true;
 }
 
 // ---------------------------------------------------------------- terrain

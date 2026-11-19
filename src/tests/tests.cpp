@@ -12,6 +12,7 @@
 #include "core/models.hpp"
 #include "core/terrain.hpp"
 #include "core/textmap.hpp"
+#include "core/texsearch.hpp"
 
 using namespace te;
 
@@ -54,6 +55,18 @@ int main(int argc, char** argv) {
                 for (size_t k = 0; k + 2 < m.indices.size(); k += 3) std::fprintf(o, "f %u/%u %u/%u %u/%u\n", m.indices[k] + 1, m.indices[k] + 1, m.indices[k + 1] + 1, m.indices[k + 1] + 1, m.indices[k + 2] + 1, m.indices[k + 2] + 1);
                 std::fclose(o);
             }
+        } else if (cmd == "cherche") {   // romfs nom... -> rapport de recherche approfondie, puis lecture des trouvées
+            Game g(u8path(argv[2]));
+            TexSearch s;
+            for (int i = 3; i < argc; i++) s.names.push_back(argv[i]);
+            searchTextures(g, s, 4);
+            std::string r = s.report();
+            std::fwrite(r.data(), 1, r.size(), stdout);
+            for (size_t k = 0; k < s.names.size(); k++)
+                for (auto& u : s.usable[k]) {
+                    TexData t = bntxExtract(g.readTex(u), 64, s.names[k]);
+                    std::printf("lu : %s %dx%d %s\n", s.names[k].c_str(), t.w, t.h, t.format.c_str());
+                }
         } else if (cmd == "mc") {   // .bfres.mc -> BFRES et tampons décodés
             out(meshCodecUnpack(readFile(u8path(argv[2]))), argv[3]);
         } else if (cmd == "bntx") {

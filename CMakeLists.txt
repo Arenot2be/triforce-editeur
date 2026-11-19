@@ -60,7 +60,7 @@ endif()
 add_library(te_core STATIC
   src/core/util.cpp src/core/zs.cpp src/core/sarc.cpp src/core/byml.cpp src/core/json.cpp src/core/textmap.cpp
   src/core/restbl.cpp src/core/game.cpp src/core/build.cpp src/core/bfres.cpp src/core/bntx.cpp src/core/astc.cpp
-  src/core/terrain.cpp src/core/models.cpp src/core/mapdoc.cpp src/core/meshcodec.cpp)
+  src/core/terrain.cpp src/core/models.cpp src/core/mapdoc.cpp src/core/meshcodec.cpp src/core/texsearch.cpp)
 target_include_directories(te_core PUBLIC src ${zstd_SOURCE_DIR}/lib)
 target_link_libraries(te_core PUBLIC libzstd_static PRIVATE meshcodec)
 if(WIN32)

@@ -57,7 +57,63 @@ std::string Game::texFile(const std::string& name) {
         try { buildTexIndex(); } catch (...) {}
     }
     auto it = texIndex_.find(lower(name));
-    return it == texIndex_.end() ? "" : it->second;
+    if (it != texIndex_.end()) return it->second;
+    loadFound();
+    auto f = found_.find(lower(name));
+    return f == found_.end() ? "" : f->second;
+}
+
+static fs::path foundPath() {
+    return homeDir() / u8path("Documents") / u8path("Triforce-modkit") / u8path("cache") / u8path("textures-trouvees.txt");
+}
+
+void Game::loadFound() {
+    if (foundLoaded_) return;
+    foundLoaded_ = true;
+    std::ifstream f(foundPath(), std::ios::binary);
+    std::string line;
+    std::getline(f, line);
+    if (line != pathStr(romfs)) return;   // (pour un autre jeu)
+    while (std::getline(f, line)) {
+        auto t = line.find('\t');
+        if (t != std::string::npos) found_[line.substr(0, t)] = line.substr(t + 1);
+    }
+}
+
+void Game::addFound(const std::string& name, const std::string& loc) {
+    std::lock_guard<std::mutex> lk(texM_);
+    loadFound();
+    found_[lower(name)] = loc;
+    std::string txt = pathStr(romfs) + "\n";
+    for (auto& [k, v] : found_) txt += k + "\t" + v + "\n";
+    std::error_code ec;
+    fs::create_directories(foundPath().parent_path(), ec);
+    try { writeFileAtomic(foundPath(), Bytes(txt.begin(), txt.end())); } catch (...) {}
+}
+
+Bytes Game::readTex(const std::string& loc) const {
+    if (loc.find('|') == std::string::npos) return read(loc);
+    auto parts = split(loc, '|');
+    Bytes d = read(parts[0]);
+    for (size_t i = 1; i < parts.size(); i++) {
+        const std::string& p = parts[i];
+        if (!p.empty() && p[0] == '@') {
+            size_t o = size_t(std::stoull(p.substr(1)));
+            if (o >= d.size()) throw Error("emplacement de texture hors du fichier : " + loc);
+            return Bytes(d.begin() + long(o), d.end());
+        }
+        Sarc a = Sarc::load(d);
+        const Bytes* m = a.get(p);
+        if (!m) throw Error("membre absent : " + p + " dans " + loc);
+        d = Zs::isZstd(*m) ? zs.unpack(*m) : *m;
+    }
+    return d;
+}
+
+std::vector<std::string> Game::allFiles() {
+    findAnywhere("", 1);
+    std::lock_guard<std::mutex> lk(texM_);
+    return all_;
 }
 
 std::vector<std::string> Game::findAnywhere(const std::string& name, size_t max) {

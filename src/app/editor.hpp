@@ -13,6 +13,7 @@
 
 #include "app/math.hpp"
 #include "app/render.hpp"
+#include "core/texsearch.hpp"
 #include "core/bntx.hpp"
 #include "core/mapdoc.hpp"
 #include "core/models.hpp"
@@ -180,6 +181,12 @@ public:
     std::string autoTerrain() const;
     bool groundAt(double x, double z, double& h) const;
     void freeAssets();
+    // -- recherche approfondie des textures introuvables (dans tout le jeu, en arrière-plan)
+    std::shared_ptr<TexSearch> texSearch;
+    std::string texSearchReport;
+    std::vector<std::string> missingTextures() const;   // (introuvables, ou affichées avec une voisine)
+    void startTexSearch();
+    bool pollTexSearch();   // (vrai à la fin d'une recherche : le rapport est prêt)
 
     // -- messages
     std::string toast;
@@ -193,7 +200,7 @@ public:
 
 private:
     std::mutex logM_;
-    std::thread buildThread_;
+    std::thread buildThread_, searchThread_;
 };
 
 std::string fmtNum(double v);
