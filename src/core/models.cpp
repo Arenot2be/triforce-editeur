@@ -13,7 +13,13 @@ void ModelIndex::index() {
     if (!fs::is_directory(folder, ec)) return;
     std::vector<std::string> names;
     for (auto& e : fs::directory_iterator(folder, ec)) names.push_back(pathStr(e.path().filename()));
-    std::sort(names.begin(), names.end());
+    // (le jeu ouvre toujours <modèle>.bfres.zs : quand le même modèle existe aussi en .bfres.mc, c'est le .zs qui
+    //  compte — les .mc sont d'anciennes copies, dont certaines dans un format MeshCodec 1.0 que le jeu ne lit pas)
+    std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) {
+        bool az = endsWith(a, ".zs"), bz = endsWith(b, ".zs");
+        if (az != bz) return az;
+        return a < b;
+    });
     for (auto& n : names) {
         if (!(endsWith(n, ".bfres.zs") || endsWith(n, ".bfres.mc")) || n.find(".anim.") != std::string::npos) continue;
         auto parts = split(n.substr(0, n.size() - 9), '.');

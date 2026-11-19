@@ -57,8 +57,8 @@ Bytes meshCodecUnpack(const Bytes& raw) {
     uint8_t verMinor = raw[5];
     uint32_t flags = rd32(raw, 8);
     if (verMajor == 1)
-        throw Error("MeshCodec 1.0 (nouvelle version, 5 modèles du jeu) : le modèle est lisible mais sa géométrie utilise une "
-                    "compression inconnue, pas encore décodée");
+        throw Error("MeshCodec 1.0 : géométrie dans une compression inconnue ; le jeu n'ouvre pas ce fichier "
+                    "(il charge le .bfres.zs du même modèle, absent ici)");
     if (verMajor != 0 || verMinor > 1) throw Error(fmt("MeshCodec version %u.%u non prise en charge", verMajor, verMinor));
     size_t outSize = size_t(flags >> 5) << (flags & 0xf);
     if (outSize < 0x100 || outSize > (size_t(1) << 31)) throw Error(fmt("MeshCodec : taille décompressée incohérente (%zu)", outSize));
