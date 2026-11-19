@@ -269,8 +269,10 @@ void rightPanel(Editor& ed) {
                 ImGui::TextDisabled("%s", s.c_str());
             } else if (ms->st == ModelSlot::None) {
                 ImGui::TextDisabled("Pas de modèle : %s", ms->why.c_str());
-                if (ms->why.find(MESHLETS) != std::string::npos && ImGui::SmallButton("Exporter ce modèle pour analyse"))
-                    ed.exportModel(n);
+                // (pour tout modèle illisible, pas seulement les meshlets : la raison affichée suffit à trier ensuite)
+                if (ImGui::SmallButton("Exporter ce modèle pour analyse")) ed.exportModel(n);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Copier la raison")) ImGui::SetClipboardText((n + " : " + ms->why).c_str());
             } else {
                 ImGui::TextDisabled("Modèle : chargement…");
             }
