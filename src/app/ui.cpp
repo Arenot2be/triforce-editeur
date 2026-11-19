@@ -28,7 +28,7 @@ struct UiState {
     std::string propsVal;       // (valeur affichée la dernière fois : pour voir les changements faits ailleurs)
     std::string propsErr;
     bool keepYaw = true;
-    bool showHelp = false, showFolders = false, showBuild = false, showTex = false, askRevert = false, askSave = false, askQuit = false;
+    bool showHelp = false, showFolders = false, showBuild = false, showTex = false, showMdl = false, askRevert = false, askSave = false, askQuit = false;
     std::string romfs, work, mods;
     bool viewHovered = false;
     float boxX0 = 0, boxY0 = 0;
@@ -60,6 +60,20 @@ std::string texLine(Editor& ed, const std::string& name) {
         case TexSlot::Mask: return name + " — ignorée : " + t.why;
         default: return name + " — illisible : " + t.why;
     }
+}
+
+// (pour la liste des modèles à problème : ce qui manque à un modèle chargé, une ligne par problème ; "" si rien)
+std::string modelProblems(Editor& ed, const ModelSlot& s) {
+    std::string out;
+    for (auto& nt : s.notes) out += "\n    " + nt;
+    bool untextured = false;
+    for (auto& sb : s.gpu.subs) {
+        if (sb.tex.empty()) { untextured = true; continue; }
+        auto it = ed.texSlots.find(sb.tex);
+        if (it != ed.texSlots.end() && it->second.st == TexSlot::None) out += "\n    texture " + sb.tex + " : " + it->second.why;
+    }
+    if (untextured && s.notes.empty()) out += "\n    partie sans texture dans le matériau";
+    return out.empty() ? out : out + "\n";
 }
 
 void tryOpen(Editor& ed, const std::string& rel) {
@@ -555,6 +569,11 @@ void viewport(Editor& ed) {
         int ok = 0, none = 0, loading = 0;
         for (auto& [k, s] : ed.modelSlots) (s.st == ModelSlot::Ok ? ok : s.st == ModelSlot::None ? none : loading)++;
         ImGui::TextDisabled("%d chargé(s), %d sans modèle%s", ok, none, loading ? fmt(", %d en cours", loading).c_str() : "");
+        int partial = 0;
+        for (auto& [k, s] : ed.modelSlots)
+            if (s.st == ModelSlot::Ok && !modelProblems(ed, s).empty()) partial++;
+        ImGui::SameLine(0, 4);
+        if ((partial || none) && ImGui::SmallButton(fmt("%d sans texture", partial).c_str())) U.showMdl = true;
     }
     ImGui::SameLine();
     ImGui::Checkbox("Textures", &ed.showTextures);
@@ -684,6 +703,29 @@ void dialogs(Editor& ed, bool& quit) {
         if (ImGui::Button("Fermer")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+    modal("Modèles à problème", U.showMdl);
+    if (ImGui::BeginPopupModal("Modèles à problème", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        std::string a, b;
+        int na = 0, nb = 0;
+        for (auto& [n, s] : ed.modelSlots) {
+            if (s.st == ModelSlot::Ok) {
+                std::string p = modelProblems(ed, s);
+                if (!p.empty()) { a += n + p; na++; }
+            } else if (s.st == ModelSlot::None) {
+                b += n + " : " + s.why + "\n";
+                nb++;
+            }
+        }
+        std::string all = fmt("Modèles chargés en partie sans texture : %d\n", na) + a + fmt("\nSans modèle : %d\n", nb) + b;
+        ImGui::InputTextMultiline("##mdl", &all, {900, 440}, ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::Button("Tout copier")) {
+            ImGui::SetClipboardText(all.c_str());
+            ed.say(fmt("%d modèles copiés dans le presse-papiers", na + nb));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Fermer")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
     modal("Revenir à la version du jeu ?", U.askRevert);
     if (ImGui::BeginPopupModal("Revenir à la version du jeu ?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("Ta version modifiée de cette carte sera supprimée du dossier de travail.");
@@ -748,6 +790,7 @@ void shortcuts(Editor& ed) {
 }
 }  // namespace
 
+void uiShowModels() { U.showMdl = true; }   // (commande de script « modeles »)
 void uiShowTextures() { U.showTex = true; }   // (commande de script « textures »)
 
 void drawUI(Editor& ed, bool& quit, bool closeRequested) {
