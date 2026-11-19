@@ -2,6 +2,7 @@
 #include "core/bfres.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <cmath>
 #include <map>
@@ -233,7 +234,7 @@ void meshletGeometry(const Bytes& d, size_t hdr, size_t end, std::vector<double>
         prev = c;
     }
     uint32_t count = rd32(d, hdr + 20);
-    size_t recSize = 8 * size_t(4 + __builtin_popcount(flags & 0xC00u) + __builtin_popcount(flags & 0x1F000u));
+    size_t recSize = 8 * size_t(4 + std::popcount(flags & 0xC00u) + std::popcount(flags & 0x1F000u));
     size_t base = hdr + 84;
     if (!count || base + recSize * count > end) throw Error("meshlets : descripteurs hors du tampon");
     size_t bits = (end - base) * 8;
