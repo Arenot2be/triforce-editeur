@@ -20,7 +20,7 @@ static_assert(sizeof(PC) == 128, "constantes de 128 octets");
 
 struct GpuMesh {
     VkBuf vb, ib;
-    struct Sub { uint32_t start, count; std::string tex; int kind = 0; std::string nrm; };
+    struct Sub { uint32_t start, count; std::string tex; int kind = 0; std::string nrm, flow; };
     std::vector<Sub> subs;
     bool translucent = false;   // (a des parties d'eau, de fondu ou de verre)
     float bbox[6] = {0, 0, 0, 0, 0, 0};
@@ -68,7 +68,8 @@ public:
     void drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& texPerSub, bool translucent = false);
     // (parties d'eau : leur carte de normales par partie, `signedNrm` si la carte est signée ; time en secondes)
     void drawWater(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& nrm,
-                   const std::vector<char>& signedNrm, float time);
+                   const std::vector<VkDescriptorSet>& flow, const std::vector<char>& signedNrm, float time);
+    VkPipelineLayout waterLayout = VK_NULL_HANDLE;   // (deux textures : normales, carte de courant)
     void drawTerrain(VkCommandBuffer c, const PC& pc);
     void drawLines(VkCommandBuffer c, const PC& pc);
 

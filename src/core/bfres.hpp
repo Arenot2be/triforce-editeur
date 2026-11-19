@@ -9,7 +9,7 @@ namespace te {
 
 struct Mesh {
     // kind (parties sans texture de couleur) : 0 opaque, 1 eau, 2 fondu ou lumière, 3 verre ou glace
-    struct Sub { uint32_t start = 0, count = 0; std::string tex; int kind = 0; std::string material; std::string nrm; };
+    struct Sub { uint32_t start = 0, count = 0; std::string tex; int kind = 0; std::string material; std::string nrm, flow; };
     std::vector<float> positions, uvs;   // (x, y, z) ; (u, v)
     std::vector<uint32_t> indices;
     std::vector<Sub> subs;

@@ -418,7 +418,7 @@ std::string albedo(const std::vector<std::string>& names) {
     for (auto& n : names) {
         if (n.empty()) continue;
         std::string l = lower(n);
-        bool bad = endsWith(l, "cmb") || endsWith(l, "_fx") || endsWith(l, "mask") || l.rfind("cmntex_bake", 0) == 0;   // (éclairage précalculé)
+        bool bad = endsWith(l, "cmb") || endsWith(l, "_fx") || endsWith(l, "_ind") || l.find("flowmap") != std::string::npos || endsWith(l, "mask") || l.rfind("cmntex_bake", 0) == 0;   // (éclairage précalculé)
         for (auto k : NOT) if (endsWith(l, k) || l.find(std::string(k) + "_") != std::string::npos) bad = true;
         if (!bad) return n;
     }
@@ -480,7 +480,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
         if (s.kind == 1 && size_t(matIdx) < materials.size())
             for (auto& n : materials[size_t(matIdx)]) {
                 std::string l = lower(n);
-                if (l.find("_nrm") != std::string::npos && l.rfind("cmntex_bake", 0) != 0) { s.nrm = n; break; }
+                if (s.nrm.empty() && l.find("_nrm") != std::string::npos && l.rfind("cmntex_bake", 0) != 0) s.nrm = n;
+                if (s.flow.empty() && l.find("flowmap") != std::string::npos && l.find("_nrm") == std::string::npos) s.flow = n;
             }
         return s;
     };

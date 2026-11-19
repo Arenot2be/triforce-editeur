@@ -640,20 +640,26 @@ void Editor::render(VkCommandBuffer c) {
         float time = std::chrono::duration<float>(std::chrono::steady_clock::now() - t0).count();
         time = std::fmod(time, 3600.f);
         vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, rend.waterPipe);
-        std::vector<VkDescriptorSet> nrm;
+        std::vector<VkDescriptorSet> nrm, flow;
         std::vector<char> sgn;
+        auto loaded = [&](const std::string& n) -> TexSlot* {
+            if (n.empty() || !showTextures) return nullptr;
+            TexSlot* t = texture(n);
+            return t && (t->st == TexSlot::Ok || t->st == TexSlot::Mask) && t->tex.set ? t : nullptr;
+        };
         for (auto& l : late) {
             nrm.assign(l.g->subs.size(), VK_NULL_HANDLE);
+            flow.assign(l.g->subs.size(), VK_NULL_HANDLE);
             sgn.assign(l.g->subs.size(), 0);
             for (size_t i = 0; i < l.g->subs.size(); i++) {
-                if (l.g->subs[i].kind != 1 || l.g->subs[i].nrm.empty() || !showTextures) continue;
-                TexSlot* t = texture(l.g->subs[i].nrm);
-                if (t && (t->st == TexSlot::Ok || t->st == TexSlot::Mask) && t->tex.set) {
+                if (l.g->subs[i].kind != 1) continue;
+                if (TexSlot* t = loaded(l.g->subs[i].nrm)) {
                     nrm[i] = t->tex.set;
                     sgn[i] = t->format.find("sign") != std::string::npos;
                 }
+                if (TexSlot* t = loaded(l.g->subs[i].flow)) flow[i] = t->tex.set;
             }
-            rend.drawWater(c, *l.g, l.pc, nrm, sgn, time);
+            rend.drawWater(c, *l.g, l.pc, nrm, flow, sgn, time);
         }
         vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, rend.meshBlendPipe);
         std::vector<VkDescriptorSet> none;

@@ -86,9 +86,19 @@ void Renderer::init() {
     meshBlendPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 20,
                              {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false,
                              false, true);
-    waterPipe = pipeline(SPV_WATER_VERT, sizeof SPV_WATER_VERT, SPV_WATER_FRAG, sizeof SPV_WATER_FRAG, 20,
-                         {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false,
-                         false, true);
+    {
+        VkDescriptorSetLayout sets[2] = {vk.texLayout, vk.texLayout};
+        VkPipelineLayoutCreateInfo wl = lc;
+        wl.setLayoutCount = 2;
+        wl.pSetLayouts = sets;
+        check(vkCreatePipelineLayout(vk.dev, &wl, nullptr, &waterLayout), "vkCreatePipelineLayout (eau)");
+        VkPipelineLayout keep = layout;
+        layout = waterLayout;
+        waterPipe = pipeline(SPV_WATER_VERT, sizeof SPV_WATER_VERT, SPV_WATER_FRAG, sizeof SPV_WATER_FRAG, 20,
+                             {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true,
+                             false, false, true);
+        layout = keep;
+    }
     {
         VkDescriptorSetLayout sets[5] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout};
         VkPipelineLayoutCreateInfo tl = lc;
@@ -137,7 +147,7 @@ GpuMesh Renderer::upload(const Mesh& m) {
     g.vb = vk.upload(v.data(), v.size() * 4, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     g.ib = vk.upload(m.indices.data(), m.indices.size() * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     for (auto& s : m.subs) {
-        g.subs.push_back({s.start, s.count, s.tex, s.tex.empty() ? s.kind : 0, s.nrm});
+        g.subs.push_back({s.start, s.count, s.tex, s.tex.empty() ? s.kind : 0, s.nrm, s.flow});
         if (s.tex.empty() && s.kind) g.translucent = true;
     }
     std::memcpy(g.bbox, m.bbox, sizeof g.bbox);
@@ -229,7 +239,7 @@ void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const
 }
 
 void Renderer::drawWater(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& nrm,
-                         const std::vector<char>& signedNrm, float time) {
+                         const std::vector<VkDescriptorSet>& flow, const std::vector<char>& signedNrm, float time) {
     if (!g.translucent || !waterPipe) return;
     VkDeviceSize off = 0;
     vkCmdBindVertexBuffers(c, 0, 1, &g.vb.buf, &off);
@@ -239,11 +249,12 @@ void Renderer::drawWater(VkCommandBuffer c, const GpuMesh& g, const PC& pc, cons
         PC p = pc;
         // (couleur du fond : vert-bleu des rivières d'Hyrule ; a : temps)
         p.color[0] = 0.06f; p.color[1] = 0.24f; p.color[2] = 0.27f; p.color[3] = time;
-        VkDescriptorSet set = i < nrm.size() && nrm[i] ? nrm[i] : white.set;
-        p.scale[3] = set != white.set ? 1.f : 0.f;
-        p.rot[3] = i < signedNrm.size() && signedNrm[i] ? 1.f : 0.f;
-        vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
-        vkCmdPushConstants(c, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p);
+        VkDescriptorSet sets[2] = {i < nrm.size() && nrm[i] ? nrm[i] : white.set, i < flow.size() && flow[i] ? flow[i] : white.set};
+        // (scale.w : 1 = carte de normales, 2 = carte de courant, 4 = normales signées)
+        int flags = (sets[0] != white.set ? 1 : 0) | (sets[1] != white.set ? 2 : 0) | (i < signedNrm.size() && signedNrm[i] ? 4 : 0);
+        p.scale[3] = float(flags);
+        vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, waterLayout, 0, 2, sets, 0, nullptr);
+        vkCmdPushConstants(c, waterLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p);
         vkCmdDrawIndexed(c, g.subs[i].count, 1, g.subs[i].start, 0, 0);
     }
 }
@@ -310,6 +321,7 @@ void Renderer::destroy() {
     for (auto p : {waterPipe, meshPipe, meshBlendPipe, terrPipe, linePipe, lineTopPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
     vkDestroyPipelineLayout(vk.dev, layout, nullptr);
     vkDestroyPipelineLayout(vk.dev, terrLayout, nullptr);
+    vkDestroyPipelineLayout(vk.dev, waterLayout, nullptr);
 }
 
 }  // namespace te
