@@ -154,6 +154,12 @@ static void markAmbient(EffectInfo& e) {
 }
 
 // (UserName de l'ELinkParam de l'acteur, en suivant ses parents ; à défaut le nom de l'acteur)
+static void allStrings(const Value& v, std::vector<std::string>& out) {
+    if (v.t == T::String && !v.s.empty()) out.push_back(v.s);
+    else if (v.isMap()) { for (auto& [k, c] : *v.d) if (k != "$parent") allStrings(c, out); }
+    else if (v.isArray()) for (auto& c : *v.a) allStrings(c, out);
+}
+
 static void findUserName(const Value& v, std::string& out) {
     if (!out.empty()) return;
     if (v.isMap()) {
@@ -166,12 +172,17 @@ static void findUserName(const Value& v, std::string& out) {
 
 EffectInfo effectLoad(Game& g, const std::string& actor, const std::string& model) {
     std::string user;
+    std::vector<std::string> elink;
     std::string rel = "Pack/Actor/" + actor + ".pack.zs";
     if (g.exists(rel)) {
         if (auto p = g.pack(rel)) {
             for (auto& [n, d] : p->files) {
                 if (n.find("ELinkParam") == std::string::npos) continue;
-                try { findUserName(bymlLoad(g.zs.unpack(d)).root, user); } catch (...) {}
+                try {
+                    Value root = bymlLoad(g.zs.unpack(d)).root;
+                    findUserName(root, user);
+                    allStrings(root, elink);
+                } catch (...) {}
                 if (!user.empty()) break;
             }
         }
@@ -199,10 +210,29 @@ EffectInfo effectLoad(Game& g, const std::string& actor, const std::string& mode
     if (why.empty())
         why = "Effect/" + (user.empty() ? actor : user) + ".Nin_Ounce_NVN2.vsetb.byml.zs absent" +
               (user.empty() ? std::string(" (pas de UserName dans l'ELinkParam)") : "");
-    // (famille devinée du nom seul ; particules sans texture)
+    if (!elink.empty()) {
+        std::string l;
+        for (auto& x : elink) if (l.size() < 300) l += (l.empty() ? "" : ", ") + x;
+        why += " ; ELink de l'acteur : " + l;
+    }
+    // (famille devinée du nom seul, avec les textures que le jeu emploie d'habitude pour elle)
     EffectInfo e = effectParse(Bytes{}, user.empty() ? actor : user);
     e.actor = actor;
     e.why = why;
+    e.guessed = true;
+    switch (e.kind) {
+        case FxKind::Fog: e.mask = "Smoke_Fog_00_Fia"; break;
+        case FxKind::Leaf: e.color = "LeafFX_Texture_00_Green_Fca"; break;
+        case FxKind::Ripple: e.mask = "Liquid_Drop_Ptcls_01_FiL"; break;
+        case FxKind::Spray: e.mask = "Liquid_Splash_00_FiL"; break;
+        case FxKind::Glow: e.mask = "Glow_Sphere_00_Fi"; break;
+        case FxKind::Smoke: e.color = "Smoke_Thin_00_Fca"; break;
+        case FxKind::Fire: e.color = "Fire_Candle_01_Fca"; e.mask = "Glow_Sphere_00_Fi"; break;
+        case FxKind::Fish: e.mask = "Shape_Animal_Fish_00_Fia"; break;
+        case FxKind::Bubbles: e.mask = "Liquid_Bubble_00_Fi"; break;
+        default: break;
+    }
+    markAmbient(e);
     return e;
 }
 

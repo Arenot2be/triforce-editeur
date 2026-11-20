@@ -130,7 +130,18 @@ std::string ModelIndex::file(const std::string& actor) {
         // (sans ModelInfo : un modèle de Model/ qui porte le nom de l'acteur, s'il y en a un)
         std::string rel = path(actor, "");
         if (!rel.empty()) return rel;
-        throw Error("pas de ModelInfo pour " + actor + " (pas de modèle à son nom dans Model/ non plus)");
+        // (pour comprendre : ce que contient le paquet de l'acteur)
+        std::string inside;
+        if (auto p = pack(actor)) {
+            int k = 0;
+            for (auto& [n, d] : p->files) {
+                if (k++ < 12) inside += (inside.empty() ? "" : ", ") + n;
+            }
+            inside = " ; son paquet contient " + std::to_string(p->files.size()) + " fichier(s) : " + inside;
+        } else {
+            inside = " ; pas de paquet Pack/Actor/" + actor + ".pack.zs";
+        }
+        throw Error("pas de ModelInfo pour " + actor + " (pas de modèle à son nom dans Model/ non plus)" + inside);
     }
     std::string rel = path(inf->first, inf->second);
     if (rel.empty()) throw Error("modèle " + inf->second + "." + inf->first + " introuvable dans Model/");

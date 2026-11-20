@@ -127,7 +127,7 @@ std::string noModelKind(const std::string& n) {
         return "Emplacement d'effet visuel (" + std::string(has("Fog") ? "brume" : has("Ripple") ? "ondulations sur l'eau" : has("Water") ? "eau, gouttes, cascade" :
                                                       has("Leaf") ? "feuilles qui tombent" : has("Insect") || has("Fly") ? "insectes" : "particules") +
                ") : le jeu y crée des particules, il n'a pas de modèle 3D. C'est normal ; l'éditeur dessine ses particules (case « Effets »).";
-    if (has("AirWall")) return "Mur invisible : il bloque le joueur, la caméra ou les personnages, sans rien afficher. C'est normal.";
+    if (has("AirWall") || has("Airwall") || has("airwall")) return "Mur invisible : il bloque le joueur, la caméra ou les personnages, sans rien afficher. C'est normal.";
     if (has("Area") || has("NavMeshCut")) return "Zone invisible (déclencheur, changement de règle, découpe de navigation) : pas de modèle. C'est normal.";
     if (has("Anchor") || has("StartPos") || has("Destination") || has("LookAttention"))
         return "Repère invisible (point de départ, destination, ancre de caméra ou de carte) : pas de modèle. C'est normal.";
@@ -156,15 +156,16 @@ std::string decorAudit(Editor& ed, int& pending) {
         if ((ms && ms->st == ModelSlot::Loading) || (fs && !fs->ready)) pending++;
     }
     if (pending) return "";
-    auto invisible = [](const std::string& n) {
-        for (const char* k : {"AirWall", "Area", "NavMeshCut", "Anchor", "StartPos", "Destination", "LookAttention", "Sensor", "Tag",
-                              "Spawn", "Point", "Trigger", "Camera", "Sound", "Bgm", "Location", "Rail", "Path", "Collision", "Navi"})
+    auto invisible = [](const std::string& n0) {
+        std::string n = lower(n0);
+        for (const char* k : {"airwall", "area", "navmeshcut", "anchor", "startpos", "destination", "lookattention", "sensor", "tag",
+                              "spawn", "point", "trigger", "camera", "sound", "bgm", "location", "rail", "path", "collision", "navi"})
             if (n.find(k) != std::string::npos) return true;
         return false;
     };
     struct Line { int rank; std::string text; };
     std::vector<Line> lines;
-    int nModel = 0, nFx = 0, nInvis = 0, nBox = 0, nProblem = 0, nAction = 0;
+    int nModel = 0, nFx = 0, nInvis = 0, nBox = 0, nProblem = 0, nAction = 0, nGuess = 0;
     for (auto& [n, c] : count) {
         std::string head = fmt("%4d × ", c) + n;
         if (n == "(sans nom)") { lines.push_back({1, head + " — objet sans nom d'acteur : boîte de couleur"}); nBox += c; continue; }
@@ -186,7 +187,11 @@ std::string decorAudit(Editor& ed, int& pending) {
         if (n.rfind("EftLoc", 0) == 0) {
             if (hasFx && fx->kind == FxKind::Hidden) { lines.push_back({4, head + " — " + fxs}); nInvis += c; }
             else if (hasFx) { lines.push_back({5, head + " — effet affiché (" + fxs + ")"}); nFx += c; }
-            else { lines.push_back({1, head + " — EFFET SANS FICHIER : " + (fx ? fx->why : std::string("?")) + " ; particules sans texture"}); nBox += c; }
+            else if (fx && fx->kind != FxKind::Generic) {
+                lines.push_back({3, head + " — effet deviné d'après son nom (" + std::string(fxKindName(fx->kind)) + ", textures habituelles) : " + fx->why});
+                nFx += c;
+                nGuess += c;
+            } else { lines.push_back({1, head + " — EFFET SANS FICHIER : " + (fx ? fx->why : std::string("?")) + " ; particules sans texture"}); nBox += c; }
             continue;
         }
         if (hasFx && fx->ambient) { lines.push_back({5, head + " — pas de modèle, effet permanent affiché (" + fxs + ")"}); nFx += c; continue; }
@@ -200,10 +205,10 @@ std::string decorAudit(Editor& ed, int& pending) {
     std::string out = "Bilan du décor — " + ed.doc.path + "\n\n";
     out += fmt("%zu objets, %zu sortes.\n", objs, count.size());
     out += fmt("  modèles affichés : %d (dont %d avec un problème de texture ou de forme)\n", nModel, nProblem);
-    out += fmt("  effets affichés : %d\n", nFx);
+    out += fmt("  effets affichés : %d%s\n", nFx, nGuess ? fmt(" (dont %d devinés d'après leur nom : fichier d'effet absent)", nGuess).c_str() : "");
     out += fmt("  invisibles en jeu (zones, repères, murs, masques) : %d\n", nInvis);
     out += fmt("  NON GÉRÉS (boîte de couleur à la place) : %d%s\n\n", nBox, nAction ? fmt(", dont %d avec un simple effet d'action", nAction).c_str() : "");
-    const char* titles[] = {"", "== NON GÉRÉS ==", "== modèles avec un problème ==", "", "== invisibles en jeu ==", "== affichés =="};
+    const char* titles[] = {"", "== NON GÉRÉS ==", "== modèles avec un problème ==", "== effets devinés (fichier absent) ==", "== invisibles en jeu ==", "== affichés =="};
     int cur = 0;
     for (auto& l : lines) {
         if (l.rank != cur) { cur = l.rank; if (*titles[cur]) out += std::string("\n") + titles[cur] + "\n"; }
@@ -510,7 +515,7 @@ void rightPanel(Editor& ed) {
                     else {
                         auto& e = fs->info;
                         ImGui::TextDisabled("Effet %s : %s", e.name.c_str(), fxKindName(e.kind));
-                        if (!e.why.empty()) ImGui::TextColored({0.95f, 0.75f, 0.35f, 1}, "%s ; particules sans texture", e.why.c_str());
+                        if (!e.why.empty()) ImGui::TextColored({0.95f, 0.75f, 0.35f, 1}, "%s ; %s", e.why.c_str(), e.kind != FxKind::Generic ? "effet deviné d'après son nom, avec les textures habituelles de sa famille" : "particules sans texture");
                         std::string t;
                         for (auto& x : e.textures) t += (t.empty() ? "" : ", ") + x;
                         if (!t.empty()) ImGui::TextDisabled("Textures : %s", t.c_str());

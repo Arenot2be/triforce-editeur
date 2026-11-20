@@ -21,6 +21,7 @@ struct EffectInfo {
     FxKind kind = FxKind::Generic;
     std::string color, mask;                    // (texture de couleur _Fca/_Fc… et texture d'intensité _Fi… choisies)
     bool ambient = false;                       // (effet permanent : emplacement EftLoc, ou ensemble « …_Move_00 », bougie, lueur…)
+    bool guessed = false;                       // (fichier absent : textures habituelles de la famille, devinée du nom)
     std::string why;                            // (fichier d'effet absent ou illisible : famille devinée du nom seul)
 };
 
