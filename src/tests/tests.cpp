@@ -91,6 +91,21 @@ int main(int argc, char** argv) {
                 if (!t.inst.empty())
                     std::printf("  %-8s %5zu %s  ex. %.2f %.2f %.2f s=%.2f haut=%.2f %.2f %.2f\n", t.layer.c_str(), t.inst.size(), t.model.c_str(), t.inst[0].p[0],
                                 t.inst[0].p[1], t.inst[0].p[2], t.inst[0].s, t.inst[0].y[0], t.inst[0].y[1], t.inst[0].y[2]);
+        } else if (cmd == "ground") {   // romfs préfixe-de-scène -> couverture du sol et lumières
+            Game g(u8path(argv[2]));
+            std::string st, sl;
+            auto L = groundLoad(g, argv[3], &st);
+            std::printf("%s\n", st.c_str());
+            for (auto& l : L)
+                if (!l.pts.empty()) {
+                    auto& p = l.pts[l.pts.size() / 2];
+                    std::printf("  %s : %zu cases, ex. %.2f %.2f %.2f n %.2f %.2f %.2f\n", l.name.c_str(), l.cells.size(), p.p[0], p.p[1], p.p[2], p.n[0], p.n[1], p.n[2]);
+                }
+            auto lights = lightsLoad(g, argv[3], &sl);
+            std::printf("%s\n", sl.c_str());
+            for (size_t i = 0; i < lights.size(); i += std::max<size_t>(1, lights.size() / 6))
+                std::printf("  %d %.2f %.2f %.2f col %.2f %.2f %.2f I=%.0f %.2f %.2f\n", int(lights[i].kind), lights[i].p[0], lights[i].p[1], lights[i].p[2], lights[i].col[0],
+                            lights[i].col[1], lights[i].col[2], lights[i].intensity, lights[i].a, lights[i].b);
         } else if (cmd == "fx") {   // romfs acteur -> effet lu
             Game g(u8path(argv[2]));
             EffectInfo e = effectLoad(g, argv[3]);

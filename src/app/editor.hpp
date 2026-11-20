@@ -183,6 +183,13 @@ public:
     std::vector<FolDraw> foliage;
     std::string foliageStatus;
     bool showFoliage = true;
+    // -- couverture du sol (mousse, gazon, cailloux, sous-bois) et lumières de la scène
+    std::vector<GroundLayer> ground;
+    std::string groundStatus, lightsStatus;
+    std::vector<SceneLight> lights;
+    bool showGround = true, showLights = true;
+    void emitGround(const V3& eye, const V3& camR, const V3& camU);
+    void emitLights(const V3& eye, const V3& camR, const V3& camU, float time);
     // -- effets de particules des EftLoc_* (Effect/<UserName>.Nin_Ounce_NVN2.vsetb.byml.zs)
     struct FxSlot { bool ready = false; EffectInfo info; };
     std::map<std::string, FxSlot> fxSlots;

@@ -217,6 +217,7 @@ std::string decorAudit(Editor& ed, int& pending) {
         out += l.text + "\n";
     }
     // (feuillage de la scène : plantes et branches basses)
+    out += "\n== " + ed.groundStatus + " ==\n== " + ed.lightsStatus + " ==\n";
     out += "\n== feuillage de la scène (" + ed.foliageStatus + ") ==\n";
     for (auto& f : ed.foliage) {
         ModelSlot* ms = ed.model(f.model);
@@ -261,8 +262,8 @@ std::string decorAudit(Editor& ed, int& pending) {
                 if (dir == "Tex") return "textures (lues : éclairage précalculé RBake_)";
                 if (dir.rfind("TerrainArc", 0) == 0) return "terrain (lu)";
                 if (dir.rfind("Bake/Probe", 0) == 0) return "sondes de lumière (NON LUES)";
-                if (dir.rfind("Bake/Light", 0) == 0) return "lumières de la scène (NON LUES)";
-                if (dir.rfind("Foliage/Placement", 0) == 0) return "feuillage (plantes et branches lues ; couverture du sol non lue)";
+                if (dir.rfind("Bake/Light", 0) == 0) return "lumières de la scène (lues : halos, sans éclairage des modèles)";
+                if (dir.rfind("Foliage/Placement", 0) == 0) return "feuillage (plantes, branches et couverture du sol lues)";
                 return "NON LU";
             };
             out += "\n== fichiers du jeu au nom de la scène « " + pre + " » ==\n";
@@ -888,6 +889,16 @@ void viewport(Editor& ed) {
     ImGui::Checkbox("Feuillage", &ed.showFoliage);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Plantes et branches basses posées par la scène (Foliage/Placement/Scene), à moins de 180 m de la caméra\n%s", ed.foliageStatus.c_str());
+    ImGui::SameLine();
+    ImGui::Checkbox("Sol", &ed.showGround);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Couverture du sol de la scène : mousse, gazon, cailloux, sous-bois, aux points donnés par le jeu,\n"
+                          "près de la caméra seulement (mousse à 28 m, gazon à 45 m)\n%s", ed.groundStatus.c_str());
+    ImGui::SameLine();
+    ImGui::Checkbox("Lumières", &ed.showLights);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Lumières de la scène (Bake/Light) : halos de leur couleur, faisceaux des projecteurs,\n"
+                          "voiles des lumières rectangulaires. Elles n'éclairent pas encore les modèles.\n%s", ed.lightsStatus.c_str());
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Particules des emplacements d'effet (EftLoc) : feuilles, brume, rides, embruns, lueurs…\nTextures du jeu, mouvement d'après la famille de l'effet");
     fl.end();
     if (!ed.bake.empty()) {

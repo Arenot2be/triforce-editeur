@@ -180,6 +180,28 @@ void Editor::openMap(const std::string& rel) {
         // (feuillage de la scène : lu à part, puis rangé par modèle avec la rotation de chaque plante)
         foliage.clear();
         foliageStatus = "feuillage : lecture…";
+        ground.clear();
+        lights.clear();
+        groundStatus = "couverture du sol : lecture…";
+        lightsStatus = "lumières de la scène : lecture…";
+        {
+            Game* g = game.get();
+            std::string pre = bakePrefix(rel), forMap = rel;
+            jobs.add(1, [this, g, pre, forMap]() -> std::function<void()> {
+                auto gl = std::make_shared<std::vector<GroundLayer>>();
+                auto li = std::make_shared<std::vector<SceneLight>>();
+                auto st = std::make_shared<std::string>(), sl = std::make_shared<std::string>();
+                try { *gl = groundLoad(*g, pre, st.get()); } catch (const std::exception& e) { *st = std::string("couverture du sol : ") + e.what(); }
+                try { *li = lightsLoad(*g, pre, sl.get()); } catch (const std::exception& e) { *sl = std::string("lumières de la scène : ") + e.what(); }
+                return [this, gl, li, st, sl, forMap] {
+                    if (doc.path != forMap) return;
+                    ground = std::move(*gl);
+                    lights = std::move(*li);
+                    groundStatus = *st;
+                    lightsStatus = *sl;
+                };
+            });
+        }
         {
             Game* g = game.get();
             std::string pre = bakePrefix(rel), forMap = rel;
@@ -741,6 +763,8 @@ void Editor::render(VkCommandBuffer c) {
             }
         }
     }
+    if (hasMap && showGround && showModels && !ground.empty()) emitGround(cam.eye(), camR, camU);
+    if (hasMap && showLights && !lights.empty()) emitLights(cam.eye(), camR, camU, fxTime);
     if (!late.empty()) {
         // (eau d'abord, avec sa carte de normales du jeu ; puis fondus et verre)
         static const auto t0 = std::chrono::steady_clock::now();
@@ -922,6 +946,127 @@ ModelSlot* Editor::model(const std::string& actor) {
         };
     });
     return &s;
+}
+
+// ---------------------------------------------------------------- couverture du sol et lumières de la scène
+static void fxQuad(std::vector<FxVert>& fx, const V3& c, const V3& ax, const V3& ay, float r, float g, float b, float a) {
+    if (a <= 0.003f) return;
+    V3 q[4] = {c - ax - ay, c + ax - ay, c + ax + ay, c - ax + ay};
+    static const float UV[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+    for (int k : {0, 1, 2, 0, 2, 3}) fx.push_back({{float(q[k].x), float(q[k].y), float(q[k].z)}, {UV[k][0], UV[k][1]}, {r, g, b, a}});
+}
+static float hash01(uint32_t a, uint32_t b) {
+    uint32_t h = a * 0x9E3779B1u ^ (b + 0x7F4A7C15u) * 0x85EBCA77u;
+    h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12; h *= 0x297A2D39u; h ^= h >> 15;
+    return float(h & 0xFFFFFF) / float(0x1000000);
+}
+
+// Mousse (taches posées à plat sur la surface), gazon et sous-bois (touffes de brins), cailloux (petits galets),
+// aux points que le jeu donne, près de la caméra seulement : les couches comptent jusqu'à 1,7 million de points.
+void Editor::emitGround(const V3& eye, const V3& camR, const V3& camU) {
+    V3 view = norm(cross(camU, camR));
+    for (auto& L : ground) {
+        std::string ln = lower(L.name);
+        bool moss = ln.find("moss") != std::string::npos, turf = ln.find("turf") != std::string::npos, stone = ln.find("stone") != std::string::npos;
+        bool blades = turf || (!moss && !stone);   // (sous-bois et couches inconnues : touffes)
+        double R = moss ? 28 : turf ? 45 : stone ? 35 : 35;
+        size_t budget = moss ? 45000 : 25000, used = 0;
+        FxBatch b;
+        b.first = uint32_t(rend.fx.size());
+        b.mode = blades ? 7 : 0;
+        for (auto& cell : L.cells) {
+            V3 cc(cell.c[0], cell.c[1], cell.c[2]);
+            if (len(cc - eye) > R + 3.5) continue;
+            for (uint32_t k = cell.begin; k < cell.end && used < budget; k++) {
+                const GroundPt& g = L.pts[k];
+                V3 p(g.p[0], g.p[1], g.p[2]), up(g.n[0], g.n[1], g.n[2]);
+                double dist = len(p - eye);
+                if (dist > R) continue;
+                float fade = float(std::clamp((R - dist) / (R * 0.2), 0.0, 1.0));
+                float r1 = hash01(k, 1), r2 = hash01(k, 2);
+                used++;
+                if (moss || stone) {
+                    // (à plat sur la surface : deux axes perpendiculaires à sa normale)
+                    V3 t1 = std::fabs(up.y) < 0.9 ? norm(cross(up, V3(0, 1, 0))) : norm(cross(up, V3(1, 0, 0)));
+                    V3 t2 = cross(up, t1);
+                    double ang = r1 * 6.283, ca = std::cos(ang), sa = std::sin(ang);
+                    V3 a1 = t1 * ca + t2 * sa, a2 = t2 * ca - t1 * sa;
+                    if (moss) {
+                        double sz = 0.16 + g.a4 / 255.0 * 0.7 + r2 * 0.08;
+                        float v = 0.8f + 0.35f * r2;
+                        fxQuad(rend.fx, p + up * 0.015, a1 * sz, a2 * sz, 0.23f * v, 0.33f * v, 0.1f * v, 0.85f * fade);
+                    } else {
+                        double sz = 0.04 + g.a4 / 255.0 * 0.14;
+                        float v = 0.75f + 0.4f * r2;
+                        fxQuad(rend.fx, p + up * (sz * 0.4), a1 * sz, a2 * (sz * 0.8), 0.45f * v, 0.43f * v, 0.39f * v, fade);
+                    }
+                } else {
+                    // (touffe : quelques brins inclinés, tournés vers la caméra autour de leur axe)
+                    int nb = turf ? 7 : 5;
+                    double h0 = turf ? 0.22 : 0.3 + g.kind * 0.02;
+                    for (int j = 0; j < nb; j++) {
+                        float q1 = hash01(k, 10 + j), q2 = hash01(k, 30 + j), q3 = hash01(k, 50 + j);
+                        V3 off = V3((q1 - 0.5) * 0.25, 0, (q2 - 0.5) * 0.25);
+                        V3 bu = norm(up + V3((q1 - 0.5) * 0.6, 0, (q3 - 0.5) * 0.6));
+                        double h = h0 * (0.6 + 0.8 * q3);
+                        V3 side = cross(bu, view);
+                        if (len(side) < 1e-3) side = camR;
+                        side = norm(side) * (turf ? 0.018 : 0.035);
+                        float v = 0.75f + 0.4f * q2;
+                        float rr = turf ? 0.33f : 0.3f + 0.08f * float(g.kind % 3), gg = turf ? 0.5f : 0.45f, bb = turf ? 0.14f : 0.13f;
+                        fxQuad(rend.fx, p + off + bu * (h * 0.5), side, bu * (h * 0.5), rr * v, gg * v, bb * v, fade);
+                    }
+                }
+            }
+        }
+        b.count = uint32_t(rend.fx.size()) - b.first;
+        if (b.count) rend.fxBatches.push_back(b);
+    }
+}
+
+// Lumières de la scène : un halo de leur couleur (taille selon leur puissance) ; projecteurs avec leur faisceau ;
+// lumières rectangulaires (ouvertures, fenêtres) en voile lumineux. Elles n'éclairent pas encore les modèles.
+void Editor::emitLights(const V3& eye, const V3& camR, const V3& camU, float time) {
+    V3 viewDir = norm(cross(camU, camR));
+    FxBatch b;
+    b.first = uint32_t(rend.fx.size());
+    b.additive = true;
+    b.mode = 0;
+    FxBatch beams;
+    std::vector<FxVert> beamV;
+    for (size_t i = 0; i < lights.size(); i++) {
+        auto& L = lights[i];
+        V3 p(L.p[0], L.p[1], L.p[2]);
+        if (len(p - eye) > 160) continue;
+        float flick = 0.92f + 0.08f * float(std::sin(time * 2.3 + i * 1.7));
+        if (L.kind == SceneLight::Rect) {
+            V3 d = norm(V3(L.dir[0], L.dir[1], L.dir[2])), u = norm(V3(L.up[0], L.up[1], L.up[2]));
+            V3 s = norm(cross(u, d));
+            fxQuad(rend.fx, p, s * (L.a * 0.5), u * (L.b * 0.5), L.col[0], L.col[1], L.col[2], 0.07f);
+            continue;
+        }
+        double sz = 0.25 + std::sqrt(std::max(0.f, L.intensity)) * (L.kind == SceneLight::Spot ? 0.0006 : 0.012);
+        sz = std::min(sz, 2.5);
+        fxQuad(rend.fx, p, camR * sz, camU * sz, L.col[0], L.col[1], L.col[2], 0.45f * flick);
+        fxQuad(rend.fx, p, camR * (sz * 0.18), camU * (sz * 0.18), 1.f, 1.f, 1.f, 0.9f);
+        if (L.kind == SceneLight::Spot) {
+            V3 d = norm(V3(L.dir[0], L.dir[1], L.dir[2]));
+            double lenB = 3.5, w = std::tan(std::clamp(double(L.b), 5.0, 60.0) * 3.14159 / 180) * lenB * 0.5;
+            V3 side = cross(d, viewDir);
+            if (len(side) < 1e-3) side = camR;
+            fxQuad(beamV, p + d * (lenB * 0.5), norm(side) * w, d * (lenB * 0.5), L.col[0], L.col[1], L.col[2], 0.12f);
+        }
+    }
+    b.count = uint32_t(rend.fx.size()) - b.first;
+    if (b.count) rend.fxBatches.push_back(b);
+    if (!beamV.empty()) {
+        beams.first = uint32_t(rend.fx.size());
+        beams.additive = true;
+        beams.mode = 4;
+        rend.fx.insert(rend.fx.end(), beamV.begin(), beamV.end());
+        beams.count = uint32_t(beamV.size());
+        rend.fxBatches.push_back(beams);
+    }
 }
 
 // ---------------------------------------------------------------- effets de particules

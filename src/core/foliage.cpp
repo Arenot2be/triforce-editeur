@@ -1,6 +1,7 @@
 #include "core/foliage.hpp"
 
 #include <cmath>
+#include <algorithm>
 #include <cstring>
 
 #include "core/util.hpp"
@@ -67,6 +68,118 @@ FoliageSet foliageLoad(Game& g, const std::string& pre, std::string* status) {
         }
     }
     return all;
+}
+
+GroundLayer groundParse(const Bytes& d, const std::string& name) {
+    GroundLayer L;
+    L.name = name;
+    if (d.size() < 0x24 || rd32(d, 0) != 4) throw Error("pas une couverture du sol");
+    uint32_t n = rd32(d, 4);
+    size_t offs = 0x20 + size_t(n) * 4, pts = offs + (size_t(n) + 1) * 4;
+    if (n == 0 || pts > d.size()) throw Error("couverture du sol : en-tête incohérent");
+    uint32_t total = rd32(d, offs + size_t(n) * 4);
+    if (pts + size_t(total) * 12 > d.size()) throw Error("couverture du sol : points tronqués");
+    L.pts.reserve(total);
+    for (uint32_t i = 0; i < n; i++) {
+        const uint8_t* c = d.data() + 0x20 + size_t(i) * 4;
+        uint32_t b = rd32(d, offs + size_t(i) * 4), e = rd32(d, offs + size_t(i) * 4 + 4);
+        if (b > e || e > total) throw Error("couverture du sol : case incohérente");
+        GroundCell cell{{(c[0] - 128) * 4.f + 2, (c[1] - 127) * 4.f + 2, (c[2] - 128) * 4.f + 2}, uint32_t(L.pts.size()), 0};
+        for (uint32_t k = b; k < e; k++) {
+            const uint8_t* r = d.data() + pts + size_t(k) * 12;
+            GroundPt g;
+            g.p[0] = (c[0] - 128) * 4.f + r[0] / 64.f;
+            g.p[1] = (c[1] - 127) * 4.f + r[1] / 64.f;
+            g.p[2] = (c[2] - 128) * 4.f + r[2] / 64.f;
+            float ny = r[7] / 255.f, h = std::sqrt(std::max(0.f, 1 - ny * ny)), az = r[6] / 256.f * 6.2831853f;
+            g.n[0] = std::cos(az) * h;
+            g.n[1] = ny;
+            g.n[2] = std::sin(az) * h;
+            g.a3 = r[3];
+            g.a4 = r[4];
+            g.kind = r[5];
+            L.pts.push_back(g);
+        }
+        cell.end = uint32_t(L.pts.size());
+        L.cells.push_back(cell);
+    }
+    return L;
+}
+
+std::vector<GroundLayer> groundLoad(Game& g, const std::string& pre, std::string* status) {
+    std::vector<GroundLayer> out;
+    size_t total = 0;
+    for (auto& f : g.allFiles()) {
+        if (f.rfind("Foliage/Placement/Scene/", 0) != 0 || !endsWith(f, ".flnt.zs")) continue;
+        std::string base = f.substr(f.rfind('/') + 1);
+        if (base.rfind(pre + ".", 0) != 0) continue;
+        std::string layer = base.substr(0, base.size() - 8);
+        layer = layer.substr(layer.rfind('.') + 1);
+        try {
+            out.push_back(groundParse(g.read(f), layer));
+            total += out.back().pts.size();
+        } catch (const std::exception&) {}
+    }
+    if (status) {
+        std::string l;
+        for (auto& L : out) l += (l.empty() ? "" : ", ") + L.name + fmt(" %zu", L.pts.size());
+        *status = out.empty() ? "couverture du sol : aucune" : fmt("couverture du sol : %zu points (", total) + l + ")";
+    }
+    return out;
+}
+
+std::vector<SceneLight> lightsParse(const Bytes& d) {
+    if (d.size() < 0x14 || std::memcmp(d.data(), "BKLT", 4) != 0) throw Error("pas un fichier de lumières BKLT");
+    uint32_t np = rd32(d, 8), ns = rd32(d, 12), nr = rd32(d, 16);
+    size_t o = 0x14;
+    if (o + size_t(np) * 28 + size_t(ns) * 52 + size_t(nr) * 60 > d.size()) throw Error("fichier de lumières tronqué");
+    auto f = [&](size_t at) { float v; std::memcpy(&v, d.data() + at, 4); return v; };
+    std::vector<SceneLight> out;
+    auto colour = [](SceneLight& L, float r, float g, float b) {
+        float m = std::max({r, g, b, 1e-6f});
+        L.col[0] = r / m; L.col[1] = g / m; L.col[2] = b / m;
+        L.intensity = m;
+    };
+    for (uint32_t i = 0; i < np; i++, o += 28) {
+        SceneLight L;
+        L.kind = SceneLight::Point;
+        for (int k = 0; k < 3; k++) L.p[k] = f(o + 4 * k);
+        colour(L, f(o + 12), f(o + 16), f(o + 20));
+        L.a = f(o + 24);
+        out.push_back(L);
+    }
+    for (uint32_t i = 0; i < ns; i++, o += 52) {
+        SceneLight L;
+        L.kind = SceneLight::Spot;
+        for (int k = 0; k < 3; k++) { L.p[k] = f(o + 4 * k); L.dir[k] = f(o + 12 + 4 * k); }
+        colour(L, f(o + 24), f(o + 28), f(o + 32));
+        L.a = f(o + 36);
+        L.b = f(o + 40);
+        out.push_back(L);
+    }
+    for (uint32_t i = 0; i < nr; i++, o += 60) {
+        SceneLight L;
+        L.kind = SceneLight::Rect;
+        for (int k = 0; k < 3; k++) { L.p[k] = f(o + 4 * k); L.dir[k] = f(o + 12 + 4 * k); L.up[k] = f(o + 24 + 4 * k); }
+        colour(L, f(o + 36), f(o + 40), f(o + 44));
+        L.a = f(o + 48);
+        L.b = f(o + 52);
+        out.push_back(L);
+    }
+    return out;
+}
+
+std::vector<SceneLight> lightsLoad(Game& g, const std::string& pre, std::string* status) {
+    std::string rel = "Bake/Light/" + pre + ".bklight.zs";
+    if (!g.exists(rel)) {
+        if (status) *status = "lumières de la scène : pas de " + rel;
+        return {};
+    }
+    auto v = lightsParse(g.read(rel));
+    int n[3] = {0, 0, 0};
+    for (auto& L : v) n[L.kind]++;
+    if (status) *status = fmt("lumières de la scène : %d ponctuelles, %d projecteurs, %d rectangulaires", n[0], n[1], n[2]);
+    return v;
 }
 
 }  // namespace te
