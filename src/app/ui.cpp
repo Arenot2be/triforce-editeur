@@ -10,6 +10,8 @@
 
 #include "app/editor.hpp"
 #include "core/textmap.hpp"
+#include "core/bake.hpp"
+#include "core/byml.hpp"
 
 namespace te {
 
@@ -58,6 +60,8 @@ struct UiState {
     std::string propsErr;
     bool keepYaw = true;
     bool showSearch = false;
+    bool auditRunning = false, showAudit = false;
+    std::string audit;
     bool showHelp = false, showFolders = false, showBuild = false, showTex = false, showMdl = false, askRevert = false, askSave = false, askQuit = false;
     std::string romfs, work, mods;
     bool viewHovered = false;
@@ -128,6 +132,128 @@ std::string noModelKind(const std::string& n) {
     if (has("Anchor") || has("StartPos") || has("Destination") || has("LookAttention"))
         return "Repère invisible (point de départ, destination, ancre de caméra ou de carte) : pas de modèle. C'est normal.";
     return "Acteur sans modèle 3D (zone, repère ou effet) : le jeu ne l'affiche pas comme un objet. C'est normal.";
+}
+
+// ---------------------------------------------------------------- bilan du décor
+// Tout ce que la carte ouverte contient, et comment l'éditeur le montre : chaque sorte d'objet (modèle, effet, invisible
+// comme en jeu, ou boîte de couleur faute de mieux), les parties de la carte qui ne sont pas des objets, et les fichiers
+// du jeu propres à cette scène que l'éditeur ne lit pas. Attend que modèles et effets soient lus (« pending »).
+std::string decorAudit(Editor& ed, int& pending) {
+    pending = 0;
+    std::map<std::string, int> count;
+    size_t objs = 0;
+    for (auto& L : ed.doc.layers)
+        for (auto& r : L.recs) {
+            std::string n = nameOf(r->value);
+            if (n.empty()) n = "(sans nom)";
+            count[n]++;
+            objs++;
+        }
+    for (auto& [n, c] : count) {
+        if (n == "(sans nom)") continue;
+        ModelSlot* ms = ed.model(n);
+        auto* fs = ed.effect(n);
+        if ((ms && ms->st == ModelSlot::Loading) || (fs && !fs->ready)) pending++;
+    }
+    if (pending) return "";
+    auto invisible = [](const std::string& n) {
+        for (const char* k : {"AirWall", "Area", "NavMeshCut", "Anchor", "StartPos", "Destination", "LookAttention", "Sensor", "Tag",
+                              "Spawn", "Point", "Trigger", "Camera", "Sound", "Bgm", "Location", "Rail", "Path", "Collision", "Navi"})
+            if (n.find(k) != std::string::npos) return true;
+        return false;
+    };
+    struct Line { int rank; std::string text; };
+    std::vector<Line> lines;
+    int nModel = 0, nFx = 0, nInvis = 0, nBox = 0, nProblem = 0, nAction = 0;
+    for (auto& [n, c] : count) {
+        std::string head = fmt("%4d × ", c) + n;
+        if (n == "(sans nom)") { lines.push_back({1, head + " — objet sans nom d'acteur : boîte de couleur"}); nBox += c; continue; }
+        ModelSlot* ms = ed.model(n);
+        auto* fs = ed.effect(n);
+        const EffectInfo* fx = fs && fs->ready ? &fs->info : nullptr;
+        bool hasFx = fx && !fx->file.empty();
+        std::string fxs = hasFx ? std::string(fxKindName(fx->kind)) : "";
+        if (ms && ms->st == ModelSlot::Ok) {
+            std::string prob = modelProblems(ed, *ms);
+            std::string t = head + " — modèle affiché";
+            if (hasFx) t += fx->ambient ? " + effet permanent (" + fxs + ")" : " (+ effet d'action, caché comme au repos)";
+            if (!prob.empty()) { t += " — avec problème :" + prob; lines.push_back({2, t}); nProblem += c; }
+            else lines.push_back({5, t});
+            nModel += c;
+            continue;
+        }
+        std::string why = ms ? ms->why : "";
+        if (n.rfind("EftLoc", 0) == 0) {
+            if (hasFx && fx->kind == FxKind::Hidden) { lines.push_back({4, head + " — " + fxs}); nInvis += c; }
+            else if (hasFx) { lines.push_back({5, head + " — effet affiché (" + fxs + ")"}); nFx += c; }
+            else { lines.push_back({1, head + " — EFFET SANS FICHIER : " + (fx ? fx->why : std::string("?")) + " ; particules sans texture"}); nBox += c; }
+            continue;
+        }
+        if (hasFx && fx->ambient) { lines.push_back({5, head + " — pas de modèle, effet permanent affiché (" + fxs + ")"}); nFx += c; continue; }
+        if (invisible(n)) { lines.push_back({4, head + " — invisible en jeu (zone, repère ou mur), boîte de repérage"}); nInvis += c; continue; }
+        std::string t = head + " — NON GÉRÉ, boîte de couleur : " + (why.empty() ? "pas de modèle" : why);
+        if (hasFx) { t += " ; a seulement un effet d'action (" + fx->file + ")"; nAction += c; }
+        lines.push_back({1, t});
+        nBox += c;
+    }
+    std::stable_sort(lines.begin(), lines.end(), [](const Line& a, const Line& b) { return a.rank < b.rank; });
+    std::string out = "Bilan du décor — " + ed.doc.path + "\n\n";
+    out += fmt("%zu objets, %zu sortes.\n", objs, count.size());
+    out += fmt("  modèles affichés : %d (dont %d avec un problème de texture ou de forme)\n", nModel, nProblem);
+    out += fmt("  effets affichés : %d\n", nFx);
+    out += fmt("  invisibles en jeu (zones, repères, murs, masques) : %d\n", nInvis);
+    out += fmt("  NON GÉRÉS (boîte de couleur à la place) : %d%s\n\n", nBox, nAction ? fmt(", dont %d avec un simple effet d'action", nAction).c_str() : "");
+    const char* titles[] = {"", "== NON GÉRÉS ==", "== modèles avec un problème ==", "", "== invisibles en jeu ==", "== affichés =="};
+    int cur = 0;
+    for (auto& l : lines) {
+        if (l.rank != cur) { cur = l.rank; if (*titles[cur]) out += std::string("\n") + titles[cur] + "\n"; }
+        out += l.text + "\n";
+    }
+    // (parties de la carte qui ne sont pas des listes d'objets placés)
+    if (ed.game) {
+        try {
+            Document d = bymlLoad(ed.game->read(ed.doc.path));
+            if (d.root.isMap()) {
+                std::set<std::string> layerKeys;
+                for (auto& L : ed.doc.layers)
+                    if (!L.path.empty() && !L.path[0].isIndex) layerKeys.insert(L.path[0].key);
+                std::string extra;
+                for (auto& [k, v] : *d.root.d) {
+                    if (layerKeys.count(k)) continue;
+                    std::string sz = v.isArray() ? fmt(" (%zu éléments)", v.a->size()) : v.isMap() ? fmt(" (%zu clés)", v.d->size()) : "";
+                    extra += "  " + k + sz + "\n";
+                }
+                out += "\n== parties de la carte qui ne sont pas des objets placés (non dessinées) ==\n" + (extra.empty() ? "  aucune\n" : extra);
+            }
+        } catch (const std::exception& x) {
+            out += std::string("\n(carte du jeu illisible pour ce bilan : ") + x.what() + ")\n";
+        }
+        // (fichiers du jeu au nom de cette scène, rangés par dossier)
+        std::string pre = bakePrefix(ed.doc.path);
+        if (pre.size() >= 4) {
+            std::map<std::string, std::pair<int, std::string>> byDir;
+            for (auto& f : ed.game->allFiles()) {
+                std::string base = f.substr(f.find_last_of('/') + 1);
+                if (f.find(pre) == std::string::npos) continue;
+                std::string dir = f.find('/') != std::string::npos ? f.substr(0, f.find_last_of('/')) : ".";
+                auto& e = byDir[dir];
+                if (!e.first++) e.second = base;
+            }
+            auto used = [](const std::string& dir) -> const char* {
+                if (dir.rfind("Banc", 0) == 0) return "carte (lue)";
+                if (dir == "Bake/Scene") return "éclairage précalculé (lu)";
+                if (dir == "Tex") return "textures (lues : éclairage précalculé RBake_)";
+                if (dir.rfind("TerrainArc", 0) == 0) return "terrain (lu)";
+                if (dir.rfind("Bake/Probe", 0) == 0) return "sondes de lumière (NON LUES)";
+                if (dir.rfind("Bake/Light", 0) == 0) return "lumières de la scène (NON LUES)";
+                return "NON LU";
+            };
+            out += "\n== fichiers du jeu au nom de la scène « " + pre + " » ==\n";
+            if (byDir.empty()) out += "  aucun\n";
+            for (auto& [dir, e] : byDir) out += fmt("  %-40s %5d fichier(s), ex. %s — %s\n", dir.c_str(), e.first, e.second.c_str(), used(dir));
+        }
+    }
+    return out;
 }
 
 // (bouton « chercher dans tout le jeu », ou l'avancement de la recherche en cours)
@@ -681,6 +807,12 @@ void viewport(Editor& ed) {
             if (s.st == ModelSlot::Ok && !modelProblems(ed, s).empty()) partial++;
         ImGui::SameLine(0, 4);
         if ((partial || none) && ImGui::SmallButton(partial ? fmt("%d à problème", partial).c_str() : "détails")) U.showMdl = true;
+        ImGui::SameLine(0, 4);
+        if (ImGui::SmallButton(U.auditRunning ? "Bilan : lecture…" : "Bilan du décor")) U.auditRunning = true;
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Tout ce que la carte contient et comment l'éditeur le montre : modèles, effets, objets invisibles en jeu,\n"
+                              "objets non gérés (boîte de couleur), parties de la carte et fichiers de la scène non lus.\n"
+                              "Écrit aussi dans Documents\\Triforce-modkit\\analyse\\bilan-decor.txt");
     }
     fl.end();
     fl.begin();
@@ -882,6 +1014,29 @@ void dialogs(Editor& ed, bool& quit) {
         if (ImGui::Button("Fermer")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+    if (U.auditRunning && ed.game) {
+        int pending = 0;
+        std::string r = decorAudit(ed, pending);
+        if (!pending) {
+            U.auditRunning = false;
+            U.audit = r;
+            U.showAudit = true;
+            fs::path dir = homeDir() / u8path("Documents") / u8path("Triforce-modkit") / u8path("analyse");
+            std::error_code ec;
+            fs::create_directories(dir, ec);
+            try { writeFileAtomic(dir / u8path("bilan-decor.txt"), Bytes(r.begin(), r.end())); } catch (...) {}
+        }
+    }
+    modal("Bilan du décor", U.showAudit);
+    if (ImGui::BeginPopupModal("Bilan du décor", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        std::string r = U.audit;
+        ImGui::TextDisabled("Aussi écrit dans Documents\\Triforce-modkit\\analyse\\bilan-decor.txt");
+        ImGui::InputTextMultiline("##bilan", &r, {980, 480}, ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::Button("Tout copier")) { ImGui::SetClipboardText(r.c_str()); ed.say("Bilan copié dans le presse-papiers"); }
+        ImGui::SameLine();
+        if (ImGui::Button("Fermer")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
     if (ed.pollTexSearch()) U.showSearch = true;
     modal("Recherche des textures dans tout le jeu", U.showSearch);
     if (ImGui::BeginPopupModal("Recherche des textures dans tout le jeu", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -958,6 +1113,7 @@ void shortcuts(Editor& ed) {
 }  // namespace
 
 void uiShowModels() { U.showMdl = true; }   // (commande de script « modeles »)
+std::string uiDecorAudit(Editor& ed, int& pending) { return decorAudit(ed, pending); }   // (commande de script « bilan »)
 void uiShowTextures() { U.showTex = true; }   // (commande de script « textures »)
 
 void drawUI(Editor& ed, bool& quit, bool closeRequested) {

@@ -22,6 +22,7 @@ extern const size_t FONT_DROIDSANS_SIZE;
 void drawUI(Editor& ed, bool& quit, bool closeRequested);
 void uiShowTextures();
 void uiShowModels();
+std::string uiDecorAudit(Editor& ed, int& pending);
 }
 
 using namespace te;
@@ -175,6 +176,12 @@ int run(int argc, char** argv) {
                 else if (cmd == "top") ed.cam.top = !ed.cam.top;
                 else if (cmd == "textures") uiShowTextures();
                 else if (cmd == "modeles") uiShowModels();
+                else if (cmd == "bilan") {   // (bilan du décor, une fois modèles et effets lus)
+                    int pending = 1;
+                    std::string r;
+                    for (int k = 0; k < 2000 && pending; k++) { ed.jobs.pump(50); r = uiDecorAudit(ed, pending); }
+                    std::printf("%s\n", pending ? "  (bilan : lecture inachevée)" : r.c_str());
+                }
                 else if (cmd == "relief") ed.rend.terrRelief = !ed.rend.terrRelief;
                 else if (cmd == "tilt") ed.tilt = !ed.tilt;
                 else if (cmd == "terrain") ed.setTerrain(arg);
