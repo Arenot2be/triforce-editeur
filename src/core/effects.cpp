@@ -91,7 +91,7 @@ EffectInfo effectParse(const Bytes& vsetb, const std::string& name) {
     for (auto& s : e.esets) all += " " + lower(s);
     for (auto& s : e.emitters) all += " " + lower(s);
     if (has(all, {"ripple"})) e.kind = FxKind::Ripple;
-    else if (has(all, {"leaf", "petal", "confetti"}) || e.modules.count("Confetti")) e.kind = FxKind::Leaf;
+    else if (has(all, {"leaf", "petal", "confetti", "feather"}) || e.modules.count("Confetti")) e.kind = FxKind::Leaf;
     else if (has(all, {"lightshaft", "shaft", "sunbeam", "beam"})) e.kind = FxKind::Shaft;
     else if (has(all, {"dryice"})) e.kind = FxKind::Fog;   // (cascade : nappe de brume au sol)
     else if (has(all, {"waterfall", "splash", "spray", "foam", "basin"})) e.kind = FxKind::Spray;

@@ -911,8 +911,11 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
     switch (e.kind) {
         case FxKind::Leaf: {
             // (feuilles qui tombent en tournoyant, poussées par le vent ; texture de feuille du jeu)
+            // (sans texture de couleur, la forme vient de la texture d'intensité : plumes « _Fia »…)
             b.tex = tex(e.color);
             b.mode = b.tex ? 1 : 0;
+            bool shapeOnly = false;
+            if (!b.tex && (b.tex = tex(e.mask))) { b.mode = 6; shapeOnly = true; }
             const int N = 40;
             const float L = 9;
             for (int i = 0; i < N; i++) {
@@ -926,7 +929,8 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
                 V3 c = local(x, 7 - 8.5 * fr, z);
                 auto [ax, ay] = bill(c, 0.13, time * 1.7 + ph, 0.25 + 0.75 * std::fabs(std::cos(time * 2.9 + ph)));
                 float lum = 0.75f + 0.25f * fxRand(seed, i, 9);
-                if (b.mode) quad(c, ax, ay, lum, lum, lum, fade(fr, 0.06f, 0.1f));
+                if (shapeOnly) quad(c, ax, ay, 0.95f * lum, 0.95f * lum, 0.92f * lum, fade(fr, 0.06f, 0.1f));
+                else if (b.mode) quad(c, ax, ay, lum, lum, lum, fade(fr, 0.06f, 0.1f));
                 else quad(c, ax, ay, 0.35f * lum, 0.55f * lum, 0.2f * lum, fade(fr, 0.06f, 0.1f));
             }
             break;
