@@ -19,6 +19,13 @@ const char* fxKindName(FxKind k) {
         case FxKind::Fire: return "flammes";
         case FxKind::Drip: return "gouttes";
         case FxKind::Fish: return "bancs de poissons";
+        case FxKind::Hidden: return "masque de brume (invisible en jeu : il retire la brume volumique autour de lui)";
+        case FxKind::Abyss: return "abîme sombre";
+        case FxKind::Bubbles: return "bulles et courant sous l'eau";
+        case FxKind::Debris: return "débris rocheux en suspension";
+        case FxKind::Aura: return "aura du Chant de Saria";
+        case FxKind::Aurora: return "aurore";
+        case FxKind::Whirlpool: return "tourbillon";
         default: return "particules";
     }
 }
@@ -93,6 +100,7 @@ EffectInfo effectParse(const Bytes& vsetb, const std::string& name) {
     for (auto& s : e.esets) all += " " + lower(s);
     for (auto& s : e.emitters) all += " " + lower(s);
     auto classify = [&](const std::string& t) {
+        if (has(t, {"removedensity", "remove2dv"})) return FxKind::Hidden;
         if (has(t, {"ripple"})) return FxKind::Ripple;
         if (has(t, {"fishmigration", "fish_school", "_fish"})) return FxKind::Fish;
         if (has(t, {"leaf", "petal", "confetti", "feather"})) return FxKind::Leaf;
@@ -104,6 +112,13 @@ EffectInfo effectParse(const Bytes& vsetb, const std::string& name) {
         if (has(t, {"fog", "mist", "haze", "cloud", "volume"})) return FxKind::Fog;
         if (has(t, {"smoke", "steam", "chimney"})) return FxKind::Smoke;
         if (has(t, {"insect", "firefly", "glow", "light", "sparkle", "fairy", "spore", "dust", "pollen", "twinkle"})) return FxKind::Glow;
+        if (has(t, {"abyss"})) return FxKind::Abyss;
+        if (has(t, {"whirlpool"})) return FxKind::Whirlpool;
+        if (has(t, {"aurora"})) return FxKind::Aurora;
+        if (has(t, {"songofsaria", "ocarina"})) return FxKind::Aura;
+        if (has(t, {"divinggame", "waterflow", "bubble"})) return FxKind::Bubbles;
+        if (has(t, {"finalbattlefield_env", "debris", "erosion"})) return FxKind::Debris;
+        if (has(t, {"_exit"})) return FxKind::Glow;
         return FxKind::Generic;
     };
     e.kind = classify(lower(name));

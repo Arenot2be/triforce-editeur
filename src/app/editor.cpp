@@ -1020,6 +1020,129 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
             }
             break;
         }
+        case FxKind::Hidden:
+            // (masque qui retire la brume volumique : rien à voir en jeu)
+            return;
+        case FxKind::Abyss: {
+            // (abîme : grandes nappes très sombres et poussières noires qui montent lentement)
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 2 : 0;
+            for (int i = 0; i < 6; i++) {
+                double ph = fxRand(seed, i, 9) * 6.283;
+                V3 c = local((fxRand(seed, i, 1) * 2 - 1) * 4, -1 + fxRand(seed, i, 2) * 3, (fxRand(seed, i, 3) * 2 - 1) * 4);
+                auto [ax, ay] = bill(c, (5 + 4 * fxRand(seed, i, 6)) * sc, ph + time * 0.02);
+                quad(c, ax, ay, 0.05f, 0.02f, 0.07f, 0.28f + 0.06f * float(std::sin(time * 0.3 + ph)));
+            }
+            const float L = 7;
+            for (int i = 6; i < 40; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u);
+                V3 c = local((fxRand(seed, i, cyc + 1) * 2 - 1) * 5, -2 + fr * 7, (fxRand(seed, i, cyc + 2) * 2 - 1) * 5);
+                auto [ax, ay] = bill(c, 0.08 * sc, 0);
+                quad(c, ax, ay, 0.04f, 0.02f, 0.05f, 0.8f * std::sin(3.14159f * fr));
+            }
+            break;
+        }
+        case FxKind::Bubbles: {
+            // (courant sous l'eau : bulles du jeu qui montent en filant le long de l'axe X de l'acteur, vers la gauche ou la droite)
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 6 : 3;
+            // (« …_WaterFlow_3m_L » : courant vers la gauche, sur 3 m)
+            std::string ln = lower(e.name);
+            bool flow = ln.find("waterflow") != std::string::npos || ln.find("divinggame") != std::string::npos;
+            double dirx = ln.size() >= 2 && ln.compare(ln.size() - 2, 2, "_l") == 0 ? -1 : 1, reach = 5.6;
+            if (auto mpos = ln.find("m_"); mpos != std::string::npos && mpos > 0 && std::isdigit(uint8_t(ln[mpos - 1]))) reach = ln[mpos - 1] - '0';
+            const int N = 36;
+            const float L = 3.5f;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u), t = fr * L;
+                // (sans courant — marais empoisonné, passage sous l'eau — : les bulles montent sur place)
+                V3 c = flow ? local(dirx * fr * reach + std::sin(time * 3 + i) * 0.05, (fxRand(seed, i, cyc + 1) * 2 - 1) * 0.6 + t * 0.35,
+                                    (fxRand(seed, i, cyc + 2) * 2 - 1) * 0.8)
+                            : local((fxRand(seed, i, cyc + 1) * 2 - 1) * 1.5 + std::sin(time * 3 + i) * 0.05, t * 0.5,
+                                    (fxRand(seed, i, cyc + 2) * 2 - 1) * 1.5);
+                auto [ax, ay] = bill(c, (0.03 + 0.05 * fxRand(seed, i, 5)) * sc, 0);
+                quad(c, ax, ay, 0.85f, 0.95f, 1.f, 0.7f * fade(fr, 0.1f, 0.25f));
+            }
+            break;
+        }
+        case FxKind::Debris: {
+            // (débris rocheux qui flottent et tournent lentement en s'élevant, texture de roche du jeu)
+            b.tex = tex(e.color);
+            b.mode = b.tex ? 1 : 0;
+            const int N = 24;
+            const float L = 18;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u);
+                double a = fxRand(seed, i, cyc + 1) * 6.283, r = 3 + 12 * fxRand(seed, i, cyc + 2);
+                V3 c = local(std::cos(a + time * 0.02) * r, fr * 10, std::sin(a + time * 0.02) * r);
+                auto [ax, ay] = bill(c, (0.2 + 0.5 * fxRand(seed, i, 5)) * sc, time * (0.3 + fxRand(seed, i, 6)) + a);
+                quad(c, ax, ay, 0.55f, 0.5f, 0.48f, fade(fr, 0.1f, 0.15f));
+            }
+            break;
+        }
+        case FxKind::Aura: {
+            // (Chant de Saria : voile lumineux vert qui tourne en anneau autour de l'emplacement)
+            b.additive = true;
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 6 : 4;
+            V3 up = norm(matVec(R, V3(0, 1, 0)));
+            const int N = 14;
+            for (int i = 0; i < N; i++) {
+                double a = time * 0.4 + i * 6.283 / N, a2 = a + 6.283 / N;
+                V3 p0 = local(std::cos(a) * 1.4, 0.2 + 0.25 * std::sin(time + i), std::sin(a) * 1.4);
+                V3 p1 = local(std::cos(a2) * 1.4, 0.2 + 0.25 * std::sin(time + i + 1), std::sin(a2) * 1.4);
+                V3 c = (p0 + p1) * 0.5;
+                quad(c + up * (0.6 * sc), (p1 - p0) * 0.5, up * (0.6 * sc), 0.45f, 1.f, 0.55f, 0.22f);
+            }
+            break;
+        }
+        case FxKind::Aurora: {
+            // (aurore : rideaux lumineux verts et bleus qui ondulent, faits de bandes verticales)
+            b.additive = true;
+            b.mode = 4;
+            V3 up = norm(matVec(R, V3(0, 1, 0)));
+            for (int k = 0; k < 4; k++) {
+                double z0 = (k - 1.5) * 4, h = (6 + 3 * fxRand(seed, k, 1)) * sc, y0 = 6 + 2 * fxRand(seed, k, 2);
+                const int S = 18;
+                for (int i = 0; i < S; i++) {
+                    double x0 = (i - S / 2) * 1.2, x1 = x0 + 1.2;
+                    auto wave = [&](double x) { return std::sin(x * 0.35 + time * 0.5 + k) * 1.5 + std::sin(x * 0.9 - time * 0.8) * 0.4; };
+                    V3 p0 = local(x0, y0, z0 + wave(x0)), p1 = local(x1, y0, z0 + wave(x1));
+                    float g = 0.5f + 0.5f * float(std::sin(x0 * 0.3 + time * 0.7 + k));
+                    quad((p0 + p1) * 0.5 + up * (h * 0.5), (p1 - p0) * 0.5, up * (h * 0.5), 0.3f * g, 1.f, 0.6f + 0.4f * (1 - g), 0.18f);
+                }
+            }
+            break;
+        }
+        case FxKind::Whirlpool: {
+            // (tourbillon : écume et bulles qui tournent en spirale en descendant vers le centre, et anneaux à plat)
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 2 : 0;
+            V3 ex = matVec(R, V3(1, 0, 0)), ez = matVec(R, V3(0, 0, 1));
+            const int N = 50;
+            const float L = 5;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                float fr = u - std::floor(u);
+                double r = (1 - fr) * 4 + 0.2, a = fxRand(seed, i, 1) * 6.283 + fr * 9;
+                V3 c = local(std::cos(a) * r, -fr * fr * 2.5, std::sin(a) * r);
+                auto [ax, ay] = bill(c, (0.15 + 0.25 * (1 - fr)) * sc, a);
+                quad(c, ax, ay, 0.85f, 0.93f, 1.f, 0.45f * fade(fr, 0.15f, 0.3f));
+            }
+            for (int k = 0; k < 3; k++) {
+                double r = (1.5 + k * 1.2) * sc, rot = time * (0.9 - k * 0.2);
+                V3 c = local(0, 0.02 - k * 0.15, 0);
+                double cr = std::cos(rot), sr = std::sin(rot);
+                quad(c, (ex * cr + ez * sr) * r, (ez * cr - ex * sr) * r, 0.8f, 0.9f, 1.f, 0.25f);
+            }
+            break;
+        }
         case FxKind::Fish: {
             // (bancs de poissons : silhouettes sombres du jeu qui tournent sous l'eau, à plat)
             b.tex = tex(e.mask.empty() ? e.color : e.mask);
