@@ -672,7 +672,10 @@ void viewport(Editor& ed) {
     ImGui::SameLine();
     {
         int ok = 0, bad = 0, mask = 0;
-        for (auto& [k, s] : ed.texSlots) (s.st == TexSlot::Ok ? ok : s.st == TexSlot::Mask ? mask : s.st == TexSlot::None ? bad : ok)++;
+        for (auto& [k, s] : ed.texSlots) {
+            if (s.optional && s.st != TexSlot::Ok) continue;   // (textures d'appoint absentes : remplacées sans bruit)
+            (s.st == TexSlot::Ok ? ok : s.st == TexSlot::Mask ? mask : s.st == TexSlot::None ? bad : ok)++;
+        }
         ImGui::TextDisabled("%d", ok);
         ImGui::SameLine(0, 4);
         if (bad && ImGui::SmallButton(fmt("%d illisibles", bad).c_str())) U.showTex = true;
@@ -801,7 +804,7 @@ void dialogs(Editor& ed, bool& quit) {
         std::string all;
         int count = 0;
         for (auto& [n, t] : ed.texSlots) {
-            if (t.st != TexSlot::None) continue;
+            if (t.st != TexSlot::None || t.optional) continue;
             count++;
             all += texLine(ed, n) + "\n";
             std::string users;

@@ -591,9 +591,9 @@ void Editor::render(VkCommandBuffer c) {
     if (hasMap) {
         rend.bindMesh(c);
         std::vector<Renderer::SubTex> sets;
-        auto ready = [&](const std::string& n) -> VkDescriptorSet {
+        auto ready = [&](const std::string& n, bool optional = false) -> VkDescriptorSet {
             if (n.empty()) return VK_NULL_HANDLE;
-            TexSlot* t = texture(n);
+            TexSlot* t = texture(n, optional);
             return t && t->st == TexSlot::Ok ? t->tex.set : VK_NULL_HANDLE;
         };
         for (auto& L : doc.layers) {
@@ -622,7 +622,7 @@ void Editor::render(VkCommandBuffer c) {
                     for (size_t i = 0; i < g->subs.size(); i++) {
                         if (!showTextures || g->subs[i].tex.empty()) continue;
                         auto& s = g->subs[i];
-                        sets[i] = {ready(s.tex), ready(s.tex2), ready(s.detail)};
+                        sets[i] = {ready(s.tex), ready(s.tex2, true), ready(s.detail, true)};
                     }
                     // (éclairage précalculé de cet objet, d'après son Hash : la carte de sa case et la place de chaque partie)
                     Renderer::Bake bk;
@@ -632,7 +632,7 @@ void Editor::render(VkCommandBuffer c) {
                             if (hv->t == T::U64 || hv->t == T::U32 || hv->t == T::I64) {
                                 uint64_t h = hv->t == T::U64 ? hv->u : uint64_t(hv->i);
                                 auto it = bake.find(h);
-                                TexSlot* lt = it != bake.end() ? texture(it->second.tex) : nullptr;
+                                TexSlot* lt = it != bake.end() ? texture(it->second.tex, true) : nullptr;
                                 // (cartes d'éclairage en BC5 : rangées comme « masques », mais bien utilisables ici)
                                 if (lt && (lt->st == TexSlot::Ok || lt->st == TexSlot::Mask) && lt->tex.set) bk.map = lt->tex.set;
                                 if (bk.map) {
@@ -672,7 +672,7 @@ void Editor::render(VkCommandBuffer c) {
         std::vector<char> sgn;
         auto loaded = [&](const std::string& n) -> TexSlot* {
             if (n.empty() || !showTextures) return nullptr;
-            TexSlot* t = texture(n);
+            TexSlot* t = texture(n, true);
             return t && (t->st == TexSlot::Ok || t->st == TexSlot::Mask) && t->tex.set ? t : nullptr;
         };
         for (auto& l : late) {
@@ -875,11 +875,15 @@ void Editor::exportModel(const std::string& actor) {
     }
 }
 
-TexSlot* Editor::texture(const std::string& name) {
+TexSlot* Editor::texture(const std::string& name, bool optional) {
     auto it = texSlots.find(name);
-    if (it != texSlots.end()) return &it->second;
+    if (it != texSlots.end()) {
+        if (!optional) it->second.optional = false;
+        return &it->second;
+    }
     if (!game) return nullptr;
     TexSlot& s = texSlots[name];
+    s.optional = optional;
     Game* g = game.get();
     jobs.add(2, [this, name, g]() -> std::function<void()> {
         struct R { TexData t; Bytes rgba; std::string why, standIn; AstcStats st; int kind = 0; };
@@ -964,7 +968,7 @@ TexSlot* Editor::texture(const std::string& name) {
 std::vector<std::string> Editor::missingTextures() const {
     std::vector<std::string> v;
     for (auto& [n, t] : texSlots)
-        if ((t.st == TexSlot::None && t.why.rfind("introuvable", 0) == 0) || (t.st == TexSlot::Ok && !t.standIn.empty())) v.push_back(n);
+        if (!t.optional && ((t.st == TexSlot::None && t.why.rfind("introuvable", 0) == 0) || (t.st == TexSlot::Ok && !t.standIn.empty()))) v.push_back(n);
     return v;
 }
 

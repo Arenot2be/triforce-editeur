@@ -55,6 +55,7 @@ struct TexSlot {
     VkTex tex;
     std::string why, format;
     std::string standIn;   // (texture absente du jeu remplacée par une voisine de la même famille : son nom)
+    bool optional = true;  // (seulement d'appoint : normales d'eau, détail, mousse, éclairage ; son absence n'est pas un problème)
     int w = 0, h = 0, invalid = 0, empty = 0;
     std::map<std::string, int> reasons;
 };
@@ -168,7 +169,7 @@ public:
     Jobs jobs{int(std::max(2u, std::min(8u, std::thread::hardware_concurrency())))};
     ModelSlot* model(const std::string& actor);
     void exportModel(const std::string& actor);
-    TexSlot* texture(const std::string& name);
+    TexSlot* texture(const std::string& name, bool optional = false);
     std::vector<std::string> scenes;
     std::string terrainScene;   // ("" : aucun)
     // -- éclairage précalculé de la carte (Bake/Scene/<scène>_G_*.bkres.zs), par Hash d'objet
