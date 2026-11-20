@@ -11,7 +11,7 @@
 
 namespace te {
 
-enum class FxKind { Generic, Leaf, Fog, Ripple, Spray, Glow, Shaft, Smoke, Fire, Drip };
+enum class FxKind { Generic, Leaf, Fog, Ripple, Spray, Glow, Shaft, Smoke, Fire, Drip, Fish };
 
 struct EffectInfo {
     std::string actor, name, file;              // (name : UserName de l'ELink ; file : chemin dans le jeu)

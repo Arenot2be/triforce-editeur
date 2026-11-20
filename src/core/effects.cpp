@@ -18,6 +18,7 @@ const char* fxKindName(FxKind k) {
         case FxKind::Smoke: return "fumée";
         case FxKind::Fire: return "flammes";
         case FxKind::Drip: return "gouttes";
+        case FxKind::Fish: return "bancs de poissons";
         default: return "particules";
     }
 }
@@ -86,20 +87,28 @@ EffectInfo effectParse(const Bytes& vsetb, const std::string& name) {
         readVfx3(p, e);
     }
     }
-    // (famille de l'effet : d'après ses noms, puis ses modules)
-    std::string all = lower(name);
+    // (famille de l'effet : d'après son nom d'abord — « MidFog » reste une brume même si ses émetteurs s'appellent
+    // « Smoke » —, puis d'après ses ensembles et émetteurs, puis ses modules)
+    std::string all;
     for (auto& s : e.esets) all += " " + lower(s);
     for (auto& s : e.emitters) all += " " + lower(s);
-    if (has(all, {"ripple"})) e.kind = FxKind::Ripple;
-    else if (has(all, {"leaf", "petal", "confetti", "feather"}) || e.modules.count("Confetti")) e.kind = FxKind::Leaf;
-    else if (has(all, {"lightshaft", "shaft", "sunbeam", "beam"})) e.kind = FxKind::Shaft;
-    else if (has(all, {"dryice"})) e.kind = FxKind::Fog;   // (cascade : nappe de brume au sol)
-    else if (has(all, {"waterfall", "splash", "spray", "foam", "basin"})) e.kind = FxKind::Spray;
-    else if (has(all, {"drip", "drop"})) e.kind = FxKind::Drip;
-    else if (has(all, {"fire", "flame", "torch", "candle", "burn"})) e.kind = FxKind::Fire;
-    else if (has(all, {"smoke", "steam", "chimney"})) e.kind = FxKind::Smoke;
-    else if (has(all, {"fog", "mist", "haze", "cloud", "volume"})) e.kind = FxKind::Fog;
-    else if (has(all, {"insect", "firefly", "glow", "light", "sparkle", "fairy", "spore", "dust", "pollen", "twinkle"})) e.kind = FxKind::Glow;
+    auto classify = [&](const std::string& t) {
+        if (has(t, {"ripple"})) return FxKind::Ripple;
+        if (has(t, {"fishmigration", "fish_school", "_fish"})) return FxKind::Fish;
+        if (has(t, {"leaf", "petal", "confetti", "feather"})) return FxKind::Leaf;
+        if (has(t, {"lightshaft", "shaft", "sunbeam", "beam"})) return FxKind::Shaft;
+        if (has(t, {"dryice"})) return FxKind::Fog;   // (cascade : nappe de brume au sol)
+        if (has(t, {"waterfall", "splash", "spray", "foam", "basin"})) return FxKind::Spray;
+        if (has(t, {"drip", "drop"})) return FxKind::Drip;
+        if (has(t, {"fire", "flame", "torch", "candle", "burn"})) return FxKind::Fire;
+        if (has(t, {"fog", "mist", "haze", "cloud", "volume"})) return FxKind::Fog;
+        if (has(t, {"smoke", "steam", "chimney"})) return FxKind::Smoke;
+        if (has(t, {"insect", "firefly", "glow", "light", "sparkle", "fairy", "spore", "dust", "pollen", "twinkle"})) return FxKind::Glow;
+        return FxKind::Generic;
+    };
+    e.kind = classify(lower(name));
+    if (e.kind == FxKind::Generic) e.kind = classify(all);
+    if (e.kind == FxKind::Generic && e.modules.count("Confetti")) e.kind = FxKind::Leaf;
     // (textures : une de couleur avec transparence, sinon une d'intensité servant de masque)
     for (auto& t : e.textures) {
         if (e.color.empty() && (has(t, {"_Fca", "_Fc", "_Alb"}) && !has(t, {"_Nrm"}))) e.color = t;

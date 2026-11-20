@@ -990,9 +990,23 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
             break;
         }
         case FxKind::Fog: {
-            // (grandes nappes pâles qui dérivent lentement)
+            // (brume : texture du jeu — de forme « _Fi(a) », sinon de couleur « _Fca » —. Émetteurs ponctuels : quelques
+            // grandes nappes posées à l'emplacement, qui respirent ; sinon des nappes qui dérivent sur une zone)
             b.tex = tex(e.mask);
             b.mode = b.tex ? 2 : 0;
+            if (!b.tex && (b.tex = tex(e.color))) b.mode = 1;
+            bool point = e.modules.count("EmitterShapePoint") && !e.modules.count("EmitterShapeCube") && !e.modules.count("EmitterShapeSphereVolume");
+            if (point) {
+                int N = std::clamp(int(e.emitters.size()), 2, 6);
+                for (int i = 0; i < N; i++) {
+                    double ph = fxRand(seed, i, 9) * 6.283;
+                    V3 c = local((fxRand(seed, i, 1) * 2 - 1) * 2 + std::sin(time * 0.05 + ph) * 0.8, 0.5 + fxRand(seed, i, 2) * 1.5,
+                                 (fxRand(seed, i, 3) * 2 - 1) * 2 + std::cos(time * 0.04 + ph) * 0.6);
+                    auto [ax, ay] = bill(c, (6 + 4 * fxRand(seed, i, 6)) * sc, ph + time * 0.015);
+                    quad(c, ax, ay, 0.82f, 0.88f, 0.94f, 0.13f + 0.04f * float(std::sin(time * 0.2 + ph)));
+                }
+                break;
+            }
             const int N = 10;
             const float L = 26;
             for (int i = 0; i < N; i++) {
@@ -1003,6 +1017,23 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
                 V3 c = local(x, 0.6 + fxRand(seed, i, 5) * 2, z);
                 auto [ax, ay] = bill(c, (5 + 3 * fxRand(seed, i, 6)) * sc, fxRand(seed, i, 8) * 6.283 + time * 0.02);
                 quad(c, ax, ay, 0.8f, 0.86f, 0.92f, 0.16f * std::sin(3.14159f * fr));
+            }
+            break;
+        }
+        case FxKind::Fish: {
+            // (bancs de poissons : silhouettes sombres du jeu qui tournent sous l'eau, à plat)
+            b.tex = tex(e.mask.empty() ? e.color : e.mask);
+            b.mode = b.tex ? 6 : 0;
+            const int N = 7;
+            V3 up = norm(matVec(R, V3(0, 1, 0)));
+            for (int i = 0; i < N; i++) {
+                double rad = (1.5 + 2.5 * fxRand(seed, i, 1)) * sc, w = (0.25 + 0.2 * fxRand(seed, i, 2)) * (fxRand(seed, i, 3) < 0.5 ? -1 : 1);
+                double a = time * w + fxRand(seed, i, 4) * 6.283, y = -0.3 - 0.4 * fxRand(seed, i, 5);
+                V3 c = local(std::cos(a) * rad / sc, y, std::sin(a) * rad / sc);
+                V3 dir = norm(matVec(R, V3(-std::sin(a) * w, 0, std::cos(a) * w)));
+                V3 side = norm(cross(up, dir));
+                double wig = 1 + 0.08 * std::sin(time * 6 + i);
+                quad(c, dir * (0.22 * sc * wig), side * (0.09 * sc), 0.08f, 0.1f, 0.1f, 0.55f);
             }
             break;
         }
@@ -1027,6 +1058,8 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
             // (embruns : bouffées blanches projetées puis retombantes, qui gonflent et s'effacent)
             b.tex = tex(e.mask);
             b.mode = b.tex ? 2 : 0;
+            if (!b.tex && (b.tex = tex(e.color))) b.mode = 1;
+            bool line = e.modules.count("EmitterShapeLine") > 0;
             const int N = 30;
             const float L = 2.4f;
             for (int i = 0; i < N; i++) {
@@ -1034,7 +1067,9 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
                 uint32_t cyc = uint32_t(std::floor(u));
                 float fr = u - std::floor(u), t = fr * L;
                 double a = fxRand(seed, i, cyc * 3 + 1) * 6.283, v = 0.8 + fxRand(seed, i, cyc * 3 + 2) * 1.4;
-                V3 c = local(std::cos(a) * v * t, 2.2 * t - 1.6 * t * t * 0.5, std::sin(a) * v * t);
+                // (émetteur en ligne, comme le pied d'une cascade : départs répartis le long de l'axe X de l'acteur)
+                double x0 = line ? (fxRand(seed, i, cyc * 3 + 3) * 2 - 1) * 2.5 : 0;
+                V3 c = local(x0 + std::cos(a) * v * t, 2.2 * t - 1.6 * t * t * 0.5, std::sin(a) * v * t);
                 auto [ax, ay] = bill(c, (0.4 + 1.8 * fr) * sc, a);
                 quad(c, ax, ay, 0.92f, 0.96f, 1.f, 0.28f * fade(fr, 0.1f, 0.9f));
             }
@@ -1072,6 +1107,7 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
         case FxKind::Smoke: {
             b.tex = tex(e.mask);
             b.mode = b.tex ? 2 : 0;
+            if (!b.tex && (b.tex = tex(e.color))) b.mode = 1;
             const int N = 14;
             const float L = 6;
             for (int i = 0; i < N; i++) {
