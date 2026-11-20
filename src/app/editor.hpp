@@ -15,6 +15,7 @@
 #include "app/render.hpp"
 #include "core/bake.hpp"
 #include "core/effects.hpp"
+#include "core/foliage.hpp"
 #include "core/texsearch.hpp"
 #include "core/bntx.hpp"
 #include "core/mapdoc.hpp"
@@ -177,6 +178,11 @@ public:
     std::map<uint64_t, BakeEntry> bake;
     std::string bakeStatus;
     bool showBake = true;
+    // -- feuillage posé par la scène (plantes, branches basses : Foliage/Placement/Scene)
+    struct FolDraw { std::string model; std::vector<std::pair<V3, V3>> posRot; std::vector<float> scale; };
+    std::vector<FolDraw> foliage;
+    std::string foliageStatus;
+    bool showFoliage = true;
     // -- effets de particules des EftLoc_* (Effect/<UserName>.Nin_Ounce_NVN2.vsetb.byml.zs)
     struct FxSlot { bool ready = false; EffectInfo info; };
     std::map<std::string, FxSlot> fxSlots;

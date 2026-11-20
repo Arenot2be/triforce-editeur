@@ -177,6 +177,38 @@ void Editor::openMap(const std::string& rel) {
         std::string sc = autoTerrain();
         if (sc != terrainScene) setTerrain(sc);
         try { bake = bakeLoad(*game, bakePrefix(rel), &bakeStatus); } catch (const std::exception& e) { bake.clear(); bakeStatus = e.what(); }
+        // (feuillage de la scène : lu à part, puis rangé par modèle avec la rotation de chaque plante)
+        foliage.clear();
+        foliageStatus = "feuillage : lecture…";
+        {
+            Game* g = game.get();
+            std::string pre = bakePrefix(rel), forMap = rel;
+            jobs.add(1, [this, g, pre, forMap]() -> std::function<void()> {
+                auto out = std::make_shared<std::vector<FolDraw>>();
+                auto st = std::make_shared<std::string>();
+                try {
+                    FoliageSet fs = foliageLoad(*g, pre, st.get());
+                    std::map<std::string, size_t> at;
+                    for (auto& t : fs.types) {
+                        if (t.inst.empty()) continue;
+                        auto [it, fresh] = at.emplace(t.model, out->size());
+                        if (fresh) out->push_back({t.model, {}, {}});
+                        FolDraw& d = (*out)[it->second];
+                        for (auto& f : t.inst) {
+                            V3 X(f.x[0], f.x[1], f.x[2]), Y(f.y[0], f.y[1], f.y[2]), Z = cross(X, Y);
+                            M3 M{{{X.x, Y.x, Z.x}, {X.y, Y.y, Z.y}, {X.z, Y.z, Z.z}}};
+                            d.posRot.push_back({V3(f.p[0], f.p[1], f.p[2]), matEuler(M, nullptr)});
+                            d.scale.push_back(f.s);
+                        }
+                    }
+                } catch (const std::exception& e) { *st = std::string("feuillage : ") + e.what(); }
+                return [this, out, st, forMap] {
+                    if (doc.path != forMap) return;
+                    foliage = std::move(*out);
+                    foliageStatus = *st;
+                };
+            });
+        }
         say("Carte ouverte : " + rel + (doc.origin == "travail" ? " (ta version modifiée)" : " (version du jeu)"));
     } catch (const std::exception& e) {
         mapError = e.what();
@@ -674,6 +706,38 @@ void Editor::render(VkCommandBuffer c) {
                     float col[4] = {1.f, 0.85f, 0.3f, 0.9f};
                     boxLines(rend.linesTop, p, eulerMat(ro), s, bb, col);
                 }
+            }
+        }
+    }
+    // (feuillage de la scène : plantes et branches basses, près de la caméra seulement)
+    if (hasMap && showFoliage && showModels && !foliage.empty()) {
+        rend.bindMesh(c);
+        std::vector<Renderer::SubTex> sets;
+        auto ready = [&](const std::string& n, bool optional = false) -> VkDescriptorSet {
+            if (n.empty()) return VK_NULL_HANDLE;
+            TexSlot* t = texture(n, optional);
+            return t && t->st == TexSlot::Ok ? t->tex.set : VK_NULL_HANDLE;
+        };
+        for (auto& f : foliage) {
+            ModelSlot* ms = model(f.model);
+            if (!ms || ms->st != ModelSlot::Ok) continue;
+            const GpuMesh* g = &ms->gpu;
+            sets.assign(g->subs.size(), Renderer::SubTex{});
+            for (size_t i = 0; i < g->subs.size(); i++) {
+                if (!showTextures || g->subs[i].tex.empty()) continue;
+                auto& sb = g->subs[i];
+                sets[i] = {ready(sb.tex), ready(sb.tex2, true), ready(sb.detail, true)};
+            }
+            for (size_t k = 0; k < f.posRot.size(); k++) {
+                const V3& p = f.posRot[k].first;
+                if (len(p - eye) > 180) continue;
+                PC pc = base;
+                pc.pos[0] = float(p.x); pc.pos[1] = float(p.y); pc.pos[2] = float(p.z); pc.pos[3] = 0;
+                pc.rot[0] = float(f.posRot[k].second.x); pc.rot[1] = float(f.posRot[k].second.y); pc.rot[2] = float(f.posRot[k].second.z);
+                pc.scale[0] = pc.scale[1] = pc.scale[2] = f.scale[k];
+                pc.color[0] = pc.color[1] = pc.color[2] = 0.72f; pc.color[3] = 1;
+                rend.drawMesh(c, *g, pc, sets, false, nullptr);
+                if (g->translucent) late.push_back({g, pc, sets});
             }
         }
     }

@@ -15,6 +15,7 @@
 #include "core/texsearch.hpp"
 #include "core/bake.hpp"
 #include "core/effects.hpp"
+#include "core/foliage.hpp"
 
 using namespace te;
 
@@ -81,6 +82,15 @@ int main(int argc, char** argv) {
                 for (auto& bm : e.mats) std::printf(" [%s %d %.3f %.3f %.4f %.4f]", bm.material.c_str(), bm.index, bm.off[0], bm.off[1], bm.scale[0], bm.scale[1]);
                 std::printf("\n");
             }
+        } else if (cmd == "foliage") {   // romfs préfixe-de-scène -> feuillage lu
+            Game g(u8path(argv[2]));
+            std::string st;
+            FoliageSet f = foliageLoad(g, argv[3], &st);
+            std::printf("%s\n", st.c_str());
+            for (auto& t : f.types)
+                if (!t.inst.empty())
+                    std::printf("  %-8s %5zu %s  ex. %.2f %.2f %.2f s=%.2f haut=%.2f %.2f %.2f\n", t.layer.c_str(), t.inst.size(), t.model.c_str(), t.inst[0].p[0],
+                                t.inst[0].p[1], t.inst[0].p[2], t.inst[0].s, t.inst[0].y[0], t.inst[0].y[1], t.inst[0].y[2]);
         } else if (cmd == "fx") {   // romfs acteur -> effet lu
             Game g(u8path(argv[2]));
             EffectInfo e = effectLoad(g, argv[3]);

@@ -155,6 +155,8 @@ std::string decorAudit(Editor& ed, int& pending) {
         auto* fs = ed.effect(n);
         if ((ms && ms->st == ModelSlot::Loading) || (fs && !fs->ready)) pending++;
     }
+    for (auto& f : ed.foliage)
+        if (ModelSlot* ms = ed.model(f.model); ms && ms->st == ModelSlot::Loading) pending++;
     if (pending) return "";
     auto invisible = [](const std::string& n0) {
         std::string n = lower(n0);
@@ -214,6 +216,15 @@ std::string decorAudit(Editor& ed, int& pending) {
         if (l.rank != cur) { cur = l.rank; if (*titles[cur]) out += std::string("\n") + titles[cur] + "\n"; }
         out += l.text + "\n";
     }
+    // (feuillage de la scène : plantes et branches basses)
+    out += "\n== feuillage de la scène (" + ed.foliageStatus + ") ==\n";
+    for (auto& f : ed.foliage) {
+        ModelSlot* ms = ed.model(f.model);
+        bool ok = ms && ms->st == ModelSlot::Ok;
+        std::string prob = ok ? modelProblems(ed, *ms) : "";
+        out += fmt("%5zu × ", f.posRot.size()) + f.model +
+               (ok ? (prob.empty() ? " — modèle affiché" : " — modèle affiché, avec problème :" + prob) : " — NON GÉRÉ : " + (ms ? ms->why : std::string("?"))) + "\n";
+    }
     // (parties de la carte qui ne sont pas des listes d'objets placés)
     if (ed.game) {
         try {
@@ -251,6 +262,7 @@ std::string decorAudit(Editor& ed, int& pending) {
                 if (dir.rfind("TerrainArc", 0) == 0) return "terrain (lu)";
                 if (dir.rfind("Bake/Probe", 0) == 0) return "sondes de lumière (NON LUES)";
                 if (dir.rfind("Bake/Light", 0) == 0) return "lumières de la scène (NON LUES)";
+                if (dir.rfind("Foliage/Placement", 0) == 0) return "feuillage (plantes et branches lues ; couverture du sol non lue)";
                 return "NON LU";
             };
             out += "\n== fichiers du jeu au nom de la scène « " + pre + " » ==\n";
@@ -872,6 +884,10 @@ void viewport(Editor& ed) {
     ImGui::Checkbox("Noms", &ed.showLabels);
     ImGui::SameLine();
     ImGui::Checkbox("Effets", &ed.showEffects);
+    ImGui::SameLine();
+    ImGui::Checkbox("Feuillage", &ed.showFoliage);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Plantes et branches basses posées par la scène (Foliage/Placement/Scene), à moins de 180 m de la caméra\n%s", ed.foliageStatus.c_str());
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Particules des emplacements d'effet (EftLoc) : feuilles, brume, rides, embruns, lueurs…\nTextures du jeu, mouvement d'après la famille de l'effet");
     fl.end();
     if (!ed.bake.empty()) {
