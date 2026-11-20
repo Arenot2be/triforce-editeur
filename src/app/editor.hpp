@@ -14,6 +14,7 @@
 #include "app/math.hpp"
 #include "app/render.hpp"
 #include "core/bake.hpp"
+#include "core/effects.hpp"
 #include "core/texsearch.hpp"
 #include "core/bntx.hpp"
 #include "core/mapdoc.hpp"
@@ -176,6 +177,13 @@ public:
     std::map<uint64_t, BakeEntry> bake;
     std::string bakeStatus;
     bool showBake = true;
+    // -- effets de particules des EftLoc_* (Effect/<UserName>.Nin_Ounce_NVN2.vsetb.byml.zs)
+    struct FxSlot { bool ready = false; EffectInfo info; };
+    std::map<std::string, FxSlot> fxSlots;
+    FxSlot* effect(const std::string& actor);
+    bool showEffects = true;
+    // (particules d'un effet placé : ajoutées à rend.fx pour cette image)
+    void emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint32_t seed, float time, const V3& camRight, const V3& camUp);
     std::vector<TerrainTile> tiles;
     std::string terrainStatus;
     std::string terrainMatStatus, terrainCmbStatus;   // (textures du sol : Tex/MaterialAlb, relief : Tex/MaterialCmb)

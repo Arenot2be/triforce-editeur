@@ -14,6 +14,7 @@
 #include "core/textmap.hpp"
 #include "core/texsearch.hpp"
 #include "core/bake.hpp"
+#include "core/effects.hpp"
 
 using namespace te;
 
@@ -80,6 +81,15 @@ int main(int argc, char** argv) {
                 for (auto& bm : e.mats) std::printf(" [%s %d %.3f %.3f %.4f %.4f]", bm.material.c_str(), bm.index, bm.off[0], bm.off[1], bm.scale[0], bm.scale[1]);
                 std::printf("\n");
             }
+        } else if (cmd == "fx") {   // romfs acteur -> effet lu
+            Game g(u8path(argv[2]));
+            EffectInfo e = effectLoad(g, argv[3]);
+            std::printf("%s %s kind=%s color=%s mask=%s\n", e.name.c_str(), e.file.c_str(), fxKindName(e.kind), e.color.c_str(), e.mask.c_str());
+            if (!e.why.empty()) std::printf("pourquoi : %s\n", e.why.c_str());
+            for (auto& s : e.esets) std::printf("eset %s\n", s.c_str());
+            for (auto& s : e.textures) std::printf("tex %s\n", s.c_str());
+            for (auto& s : e.emitters) std::printf("emitter %s\n", s.c_str());
+            for (auto& s : e.modules) std::printf("module %s\n", s.c_str());
         } else if (cmd == "mc") {   // .bfres.mc -> BFRES et tampons décodés
             out(meshCodecUnpack(readFile(u8path(argv[2]))), argv[3]);
         } else if (cmd == "bntx") {

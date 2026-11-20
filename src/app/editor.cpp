@@ -155,6 +155,7 @@ void Editor::freeAssets() {
     for (auto& [k, s] : texSlots) if (s.st == TexSlot::Ok) vk.free(s.tex);
     modelSlots.clear();
     texSlots.clear();
+    fxSlots.clear();
     rend.setTerrain({}, {});
     tiles.clear();
     terrainScene.clear();
@@ -587,6 +588,11 @@ void Editor::render(VkCommandBuffer c) {
         }
     }
     struct Late { const GpuMesh* g; PC pc; std::vector<Renderer::SubTex> tex; };
+    rend.fx.clear();
+    rend.fxBatches.clear();
+    static const auto fxT0 = std::chrono::steady_clock::now();
+    float fxTime = std::fmod(std::chrono::duration<float>(std::chrono::steady_clock::now() - fxT0).count(), 3600.f);
+    V3 camR(view.m[0], view.m[4], view.m[8]), camU(view.m[1], view.m[5], view.m[9]), eye = cam.eye();
     std::vector<Late> late;   // (parties transparentes, dessinées après tout le reste)
     if (hasMap) {
         rend.bindMesh(c);
@@ -609,6 +615,10 @@ void Editor::render(VkCommandBuffer c) {
                 pc.scale[0] = float(s.x); pc.scale[1] = float(s.y); pc.scale[2] = float(s.z);
                 auto& cc = catColor[catOf(name)];
                 pc.color[0] = cc[0]; pc.color[1] = cc[1]; pc.color[2] = cc[2]; pc.color[3] = 1;
+                // (effets de particules : dessinés en plus de la boîte, s'ils sont assez près)
+                if (showEffects && showModels && name.rfind("EftLoc", 0) == 0 && len(p - eye) < 220 && rend.fx.size() < 120000)
+                    if (FxSlot* fs = effect(name); fs && fs->ready)
+                        emitFx(*fs, p, eulerMat(ro), s, uint32_t(reinterpret_cast<uintptr_t>(r.get()) >> 4), fxTime, camR, camU);
                 ModelSlot* ms = showModels && !name.empty() ? model(name) : nullptr;
                 const GpuMesh* g = &rend.cube;
                 const float* bb = rend.cube.bbox;
@@ -692,6 +702,7 @@ void Editor::render(VkCommandBuffer c) {
         vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, rend.meshBlendPipe);
         for (auto& l : late) rend.drawMesh(c, *l.g, l.pc, l.tex, true);
     }
+    rend.drawFx(c, base);
     rend.drawLines(c, base);
 }
 
@@ -842,6 +853,225 @@ ModelSlot* Editor::model(const std::string& actor) {
         };
     });
     return &s;
+}
+
+// ---------------------------------------------------------------- effets de particules
+Editor::FxSlot* Editor::effect(const std::string& actor) {
+    auto it = fxSlots.find(actor);
+    if (it != fxSlots.end()) return &it->second;
+    if (!game) return nullptr;
+    FxSlot& s = fxSlots[actor];
+    Game* g = game.get();
+    jobs.add(1, [this, actor, g]() -> std::function<void()> {
+        auto e = std::make_shared<EffectInfo>();
+        try { *e = effectLoad(*g, actor); } catch (const std::exception& x) { e->actor = actor; e->why = x.what(); }
+        return [this, actor, e] {
+            auto it2 = fxSlots.find(actor);
+            if (it2 == fxSlots.end()) return;
+            it2->second.info = *e;
+            it2->second.ready = true;
+        };
+    });
+    return &s;
+}
+
+static float fxRand(uint32_t a, uint32_t b, uint32_t c) {
+    uint32_t h = a * 0x9E3779B1u ^ (b + 0x7F4A7C15u) * 0x85EBCA77u ^ (c + 0x165667B1u) * 0xC2B2AE3Du;
+    h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12; h *= 0x297A2D39u; h ^= h >> 15;
+    return float(h & 0xFFFFFF) / float(0x1000000);
+}
+
+// Particules d'un effet placé, recalculées à chaque image d'après le temps (sans état : chaque particule suit un
+// cycle de vie qui recommence, décalé au hasard). Le mouvement suit la famille de l'effet ; tailles en mètres,
+// volumes multipliés par l'échelle de l'acteur, orientés comme lui.
+void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint32_t seed, float time, const V3& camR, const V3& camU) {
+    const EffectInfo& e = f.info;
+    auto tex = [&](const std::string& n) -> VkDescriptorSet {
+        if (n.empty() || !showTextures) return VK_NULL_HANDLE;
+        TexSlot* t = texture(n, true);
+        return t && (t->st == TexSlot::Ok || t->st == TexSlot::Mask) && t->tex.set ? t->tex.set : VK_NULL_HANDLE;
+    };
+    FxBatch b;
+    b.first = uint32_t(rend.fx.size());
+    auto quad = [&](const V3& c, const V3& ax, const V3& ay, float r, float g, float bl, float a) {
+        if (a <= 0.002f) return;
+        V3 q[4] = {c - ax - ay, c + ax - ay, c + ax + ay, c - ax + ay};
+        static const float UV[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+        for (int k : {0, 1, 2, 0, 2, 3})
+            rend.fx.push_back({{float(q[k].x), float(q[k].y), float(q[k].z)}, {UV[k][0], UV[k][1]}, {r, g, bl, a}});
+    };
+    auto local = [&](double x, double y, double z) { return p + matVec(R, V3(x * s.x, y * s.y, z * s.z)); };
+    auto bill = [&](const V3& c, double size, double ang, double squash = 1) {
+        double ca = std::cos(ang), sa = std::sin(ang);
+        V3 ax = (camR * ca + camU * sa) * (size * squash), ay = (camU * ca - camR * sa) * size;
+        return std::make_pair(ax, ay);
+    };
+    auto fade = [](float f, float in, float out) { return std::min(1.f, f / in) * std::min(1.f, (1 - f) / out); };
+    double sc = std::max(0.2, (std::fabs(s.x) + std::fabs(s.y) + std::fabs(s.z)) / 3);
+    switch (e.kind) {
+        case FxKind::Leaf: {
+            // (feuilles qui tombent en tournoyant, poussées par le vent ; texture de feuille du jeu)
+            b.tex = tex(e.color);
+            b.mode = b.tex ? 1 : 0;
+            const int N = 40;
+            const float L = 9;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u);
+                double x = (fxRand(seed, i, cyc * 3 + 1) * 2 - 1) * 10, z = (fxRand(seed, i, cyc * 3 + 2) * 2 - 1) * 10;
+                double ph = fxRand(seed, i, 7) * 6.283;
+                x += std::sin(time * 1.3 + ph) * 0.6 + fr * 2.5;
+                z += std::cos(time * 1.1 + ph) * 0.4;
+                V3 c = local(x, 7 - 8.5 * fr, z);
+                auto [ax, ay] = bill(c, 0.13, time * 1.7 + ph, 0.25 + 0.75 * std::fabs(std::cos(time * 2.9 + ph)));
+                float lum = 0.75f + 0.25f * fxRand(seed, i, 9);
+                if (b.mode) quad(c, ax, ay, lum, lum, lum, fade(fr, 0.06f, 0.1f));
+                else quad(c, ax, ay, 0.35f * lum, 0.55f * lum, 0.2f * lum, fade(fr, 0.06f, 0.1f));
+            }
+            break;
+        }
+        case FxKind::Fog: {
+            // (grandes nappes pâles qui dérivent lentement)
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 2 : 0;
+            const int N = 10;
+            const float L = 26;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u);
+                double x = (fxRand(seed, i, cyc * 3 + 1) * 2 - 1) * 12 + (fr - 0.5) * 4, z = (fxRand(seed, i, cyc * 3 + 2) * 2 - 1) * 12 + (fr - 0.5) * 1.5;
+                V3 c = local(x, 0.6 + fxRand(seed, i, 5) * 2, z);
+                auto [ax, ay] = bill(c, (5 + 3 * fxRand(seed, i, 6)) * sc, fxRand(seed, i, 8) * 6.283 + time * 0.02);
+                quad(c, ax, ay, 0.8f, 0.86f, 0.92f, 0.16f * std::sin(3.14159f * fr));
+            }
+            break;
+        }
+        case FxKind::Ripple: {
+            // (cercles qui s'élargissent à plat dans le plan de l'acteur)
+            b.tex = tex(e.mask);
+            b.mode = !b.tex ? 3 : e.mask.find("Ripple") != std::string::npos ? 6 : 5;
+            const int N = 5;
+            const float L = 1.8f;
+            V3 ex = matVec(R, V3(1, 0, 0)), ez = matVec(R, V3(0, 0, 1));
+            for (int i = 0; i < N; i++) {
+                float u = time / L + float(i) / N + fxRand(seed, i, 0) * 0.15f;
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u);
+                V3 c = local((fxRand(seed, i, cyc * 3 + 1) * 2 - 1) * 0.5, 0.03, (fxRand(seed, i, cyc * 3 + 2) * 2 - 1) * 0.5);
+                double r = (0.1 + 1.1 * fr) * sc;
+                quad(c, ex * r, ez * r, 0.85f, 0.93f, 1.f, 0.55f * std::pow(1 - fr, 1.5f));
+            }
+            break;
+        }
+        case FxKind::Spray: {
+            // (embruns : bouffées blanches projetées puis retombantes, qui gonflent et s'effacent)
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 2 : 0;
+            const int N = 30;
+            const float L = 2.4f;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u), t = fr * L;
+                double a = fxRand(seed, i, cyc * 3 + 1) * 6.283, v = 0.8 + fxRand(seed, i, cyc * 3 + 2) * 1.4;
+                V3 c = local(std::cos(a) * v * t, 2.2 * t - 1.6 * t * t * 0.5, std::sin(a) * v * t);
+                auto [ax, ay] = bill(c, (0.4 + 1.8 * fr) * sc, a);
+                quad(c, ax, ay, 0.92f, 0.96f, 1.f, 0.28f * fade(fr, 0.1f, 0.9f));
+            }
+            break;
+        }
+        case FxKind::Glow: {
+            // (lueurs qui flottent et palpitent : insectes, poussières dans la lumière)
+            b.additive = true;
+            b.mode = 0;
+            const int N = 16;
+            for (int i = 0; i < N; i++) {
+                double ph = fxRand(seed, i, 1) * 6.283;
+                V3 c = local((fxRand(seed, i, 2) * 2 - 1) * 5 + std::sin(time * 0.35 + ph) * 1.2, 0.4 + fxRand(seed, i, 3) * 2.5 + std::sin(time * 0.6 + ph * 2) * 0.4,
+                             (fxRand(seed, i, 4) * 2 - 1) * 5 + std::cos(time * 0.3 + ph) * 1.2);
+                auto [ax, ay] = bill(c, 0.12, 0);
+                float a = 0.5f + 0.5f * float(std::sin(time * 2.6 + ph * 3));
+                quad(c, ax, ay, 1.f, 0.92f, 0.55f, 0.9f * a * a);
+            }
+            break;
+        }
+        case FxKind::Shaft: {
+            // (rayons : longues bandes claires orientées selon l'acteur, tournées vers la caméra autour de leur axe)
+            b.additive = true;
+            b.mode = 4;
+            V3 axis = norm(matVec(R, V3(0, -1, 0)));
+            for (int i = 0; i < 5; i++) {
+                V3 c = local((fxRand(seed, i, 1) * 2 - 1) * 2.5, 0, (fxRand(seed, i, 2) * 2 - 1) * 2.5) + axis * (6 * s.y);
+                V3 side = norm(cross(axis, cross(camR, camU)));
+                double w = (0.6 + fxRand(seed, i, 3) * 0.9) * sc;
+                float a = 0.07f * (0.75f + 0.25f * float(std::sin(time * 0.4 + i * 1.7)));
+                quad(c, side * w, axis * (6 * s.y), 1.f, 0.95f, 0.8f, a);
+            }
+            break;
+        }
+        case FxKind::Smoke: {
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 2 : 0;
+            const int N = 14;
+            const float L = 6;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u);
+                V3 c = local((fxRand(seed, i, cyc + 1) * 2 - 1) * 0.4 + fr * 1.2, fr * 5, (fxRand(seed, i, cyc + 2) * 2 - 1) * 0.4);
+                auto [ax, ay] = bill(c, (0.4 + 2.2 * fr) * sc, fxRand(seed, i, 5) * 6.283 + fr);
+                quad(c, ax, ay, 0.6f, 0.6f, 0.62f, 0.3f * std::sin(3.14159f * fr));
+            }
+            break;
+        }
+        case FxKind::Fire: {
+            b.additive = true;
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 2 : 0;
+            const int N = 18;
+            const float L = 0.9f;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u);
+                V3 c = local((fxRand(seed, i, cyc + 1) * 2 - 1) * 0.15, fr * 0.8, (fxRand(seed, i, cyc + 2) * 2 - 1) * 0.15);
+                auto [ax, ay] = bill(c, (0.25 - 0.18 * fr) * sc, fxRand(seed, i, 5) * 6.283);
+                quad(c, ax, ay, 1.f, 0.55f + 0.3f * (1 - fr), 0.2f, 0.8f * fade(fr, 0.1f, 0.6f));
+            }
+            break;
+        }
+        case FxKind::Drip: {
+            const int N = 8;
+            const float L = 1.4f;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u), t = fr * L;
+                V3 c = local((fxRand(seed, i, cyc + 1) * 2 - 1) * 1.5, -4.9 * t * t * 0.4, (fxRand(seed, i, cyc + 2) * 2 - 1) * 1.5);
+                auto [ax, ay] = bill(c, 0.05, 0, 0.6);
+                quad(c, ax, ay, 0.75f, 0.85f, 1.f, 0.7f * fade(fr, 0.05f, 0.2f));
+            }
+            break;
+        }
+        default: {
+            b.additive = true;
+            const int N = 10;
+            const float L = 3;
+            for (int i = 0; i < N; i++) {
+                float u = time / L + fxRand(seed, i, 0);
+                uint32_t cyc = uint32_t(std::floor(u));
+                float fr = u - std::floor(u);
+                V3 c = local((fxRand(seed, i, cyc + 1) * 2 - 1) * 2, 0.3 + fr * 1.5, (fxRand(seed, i, cyc + 2) * 2 - 1) * 2);
+                auto [ax, ay] = bill(c, 0.1, 0);
+                quad(c, ax, ay, 0.9f, 0.95f, 1.f, 0.6f * std::sin(3.14159f * fr));
+            }
+            break;
+        }
+    }
+    b.count = uint32_t(rend.fx.size()) - b.first;
+    if (b.count) rend.fxBatches.push_back(b);
 }
 
 // (pour l'analyse des formats pas encore lus : le modèle décompressé, dans Documents\Triforce-modkit\analyse)

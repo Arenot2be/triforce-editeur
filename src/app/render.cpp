@@ -10,7 +10,7 @@ namespace te {
 
 VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs, size_t fsz, uint32_t stride,
                               const std::vector<VkVertexInputAttributeDescription>& attrs, VkPrimitiveTopology topo, bool depthTest,
-                              bool depthWrite, bool cull, bool blend) {
+                              bool depthWrite, bool cull, bool blend, bool additive) {
     VkShaderModule v = vk.shader(vs, vsz), f = vk.shader(fs, fsz);
     VkPipelineShaderStageCreateInfo st[2]{};
     st[0] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, v, "main", nullptr};
@@ -41,7 +41,7 @@ VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs
     cb.colorWriteMask = 0xF;
     cb.blendEnable = blend || topo == VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     cb.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    cb.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    cb.dstColorBlendFactor = additive ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     cb.colorBlendOp = VK_BLEND_OP_ADD;
     cb.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     cb.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
@@ -125,6 +125,15 @@ void Renderer::init() {
                             {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 28}},
                             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
         layout = keep;
+    }
+    {
+        // (particules : position, coordonnées de texture, couleur ; sans écriture de profondeur)
+        std::vector<VkVertexInputAttributeDescription> a = {
+            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 20}};
+        fxPipe = pipeline(SPV_FX_VERT, sizeof SPV_FX_VERT, SPV_FX_FRAG, sizeof SPV_FX_FRAG, 36, a, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false,
+                          false, true);
+        fxAddPipe = pipeline(SPV_FX_VERT, sizeof SPV_FX_VERT, SPV_FX_FRAG, sizeof SPV_FX_FRAG, 36, a, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true,
+                             false, false, true, true);
     }
     linePipe = pipeline(SPV_LINE_VERT, sizeof SPV_LINE_VERT, SPV_LINE_FRAG, sizeof SPV_LINE_FRAG, 28,
                         {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, true, false, false);
@@ -337,9 +346,35 @@ void Renderer::drawLines(VkCommandBuffer c, const PC& pc) {
     }
 }
 
+void Renderer::drawFx(VkCommandBuffer c, const PC& pc) {
+    if (fx.empty() || fxBatches.empty()) return;
+    VkBuf& b = fxBuf_[vk.frame];
+    VkDeviceSize need = fx.size() * sizeof(FxVert);
+    if (b.size < need) {
+        if (b.buf) vk.free(b);
+        b = vk.buffer(need * 2, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true);
+    }
+    std::memcpy(b.map, fx.data(), need);
+    VkDeviceSize off = 0;
+    vkCmdBindVertexBuffers(c, 0, 1, &b.buf, &off);
+    VkPipeline cur = VK_NULL_HANDLE;
+    for (auto& fb : fxBatches) {
+        if (!fb.count) continue;
+        VkPipeline p = fb.additive ? fxAddPipe : fxPipe;
+        if (p != cur) { vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, p); cur = p; }
+        VkDescriptorSet set = fb.tex ? fb.tex : white.set;
+        vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, nullptr);
+        PC p2 = pc;
+        p2.scale[0] = float(fb.tex ? fb.mode : (fb.mode == 1 || fb.mode == 2 ? 0 : fb.mode == 5 || fb.mode == 6 ? 3 : fb.mode));
+        vkCmdPushConstants(c, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p2);
+        vkCmdDraw(c, fb.count, 1, fb.first, 0);
+    }
+}
+
 void Renderer::destroy() {
     vkDeviceWaitIdle(vk.dev);
     for (auto& b : lineBuf_) vk.free(b);
+    for (auto& b : fxBuf_) vk.free(b);
     vk.free(terrVb);
     vk.free(terrIb);
     vk.free(terrIds);
@@ -350,7 +385,7 @@ void Renderer::destroy() {
     free(cube);
     vk.free(white);
     vk.free(whiteArr);
-    for (auto p : {waterPipe, meshPipe, meshBlendPipe, terrPipe, linePipe, lineTopPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
+    for (auto p : {waterPipe, meshPipe, meshBlendPipe, terrPipe, linePipe, lineTopPipe, fxPipe, fxAddPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
     vkDestroyPipelineLayout(vk.dev, layout, nullptr);
     vkDestroyPipelineLayout(vk.dev, terrLayout, nullptr);
     vkDestroyPipelineLayout(vk.dev, waterLayout, nullptr);

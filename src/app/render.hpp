@@ -29,6 +29,9 @@ struct GpuMesh {
 };
 
 struct LineVert { float p[3]; float c[4]; };
+struct FxVert { float p[3]; float uv[2]; float c[4]; };
+// (une suite de particules d'un même effet : sa texture, sa forme — voir shaders/fx.frag — et son mélange)
+struct FxBatch { VkDescriptorSet tex = VK_NULL_HANDLE; int mode = 0; bool additive = false; uint32_t first = 0, count = 0; };
 struct TerrVert { float p[3]; float c[4]; float t[3]; };   // (c.a : côté de la grille de la tuile ; t : place dans la tuile, n° de tuile)
 
 class Renderer {
@@ -36,6 +39,7 @@ public:
     explicit Renderer(Vk& v) : vk(v) {}
     Vk& vk;
     VkPipelineLayout layout = VK_NULL_HANDLE, terrLayout = VK_NULL_HANDLE, meshLayout = VK_NULL_HANDLE;   // (meshLayout : 3 textures)
+    VkPipeline fxPipe = VK_NULL_HANDLE, fxAddPipe = VK_NULL_HANDLE;
     VkPipeline waterPipe = VK_NULL_HANDLE, meshBlendPipe = VK_NULL_HANDLE, meshPipe = VK_NULL_HANDLE, terrPipe = VK_NULL_HANDLE, linePipe = VK_NULL_HANDLE, lineTopPipe = VK_NULL_HANDLE;
     VkTex white, whiteArr;
     GpuMesh cube;
@@ -78,12 +82,16 @@ public:
     VkPipelineLayout waterLayout = VK_NULL_HANDLE;   // (deux textures : normales, carte de courant)
     void drawTerrain(VkCommandBuffer c, const PC& pc);
     void drawLines(VkCommandBuffer c, const PC& pc);
+    // particules des effets (refaites à chaque image ; triangles, 6 sommets par particule)
+    std::vector<FxVert> fx;
+    std::vector<FxBatch> fxBatches;
+    void drawFx(VkCommandBuffer c, const PC& pc);
 
 private:
-    VkBuf lineBuf_[Vk::FRAMES];
+    VkBuf lineBuf_[Vk::FRAMES], fxBuf_[Vk::FRAMES];
     VkPipeline pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs, size_t fsz, uint32_t stride,
                         const std::vector<VkVertexInputAttributeDescription>& attrs, VkPrimitiveTopology topo, bool depthTest, bool depthWrite, bool cull,
-                        bool blend = false);
+                        bool blend = false, bool additive = false);
 };
 
 }  // namespace te

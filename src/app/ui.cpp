@@ -122,7 +122,7 @@ std::string noModelKind(const std::string& n) {
     if (n.rfind("EftLoc", 0) == 0)
         return "Emplacement d'effet visuel (" + std::string(has("Fog") ? "brume" : has("Ripple") ? "ondulations sur l'eau" : has("Water") ? "eau, gouttes, cascade" :
                                                       has("Leaf") ? "feuilles qui tombent" : has("Insect") || has("Fly") ? "insectes" : "particules") +
-               ") : le jeu y crée des particules, il n'a pas de modèle 3D. C'est normal.";
+               ") : le jeu y crée des particules, il n'a pas de modèle 3D. C'est normal ; l'éditeur dessine ses particules (case « Effets »).";
     if (has("AirWall")) return "Mur invisible : il bloque le joueur, la caméra ou les personnages, sans rien afficher. C'est normal.";
     if (has("Area") || has("NavMeshCut")) return "Zone invisible (déclencheur, changement de règle, découpe de navigation) : pas de modèle. C'est normal.";
     if (has("Anchor") || has("StartPos") || has("Destination") || has("LookAttention"))
@@ -378,7 +378,23 @@ void rightPanel(Editor& ed) {
             } else if (ms->st == ModelSlot::None && ms->why.rfind("pas de ModelInfo", 0) == 0) {
                 // (acteur sans modèle par nature : on dit ce que c'est, sans alarme)
                 ImGui::TextWrapped("%s", noModelKind(n).c_str());
-                ImGui::TextDisabled("Affiché comme une boîte de couleur ; rien à corriger.");
+                if (n.rfind("EftLoc", 0) == 0) {
+                    auto* fs = ed.effect(n);
+                    if (!fs || !fs->ready) ImGui::TextDisabled("Effet : lecture…");
+                    else {
+                        auto& e = fs->info;
+                        ImGui::TextDisabled("Effet %s : %s", e.name.c_str(), fxKindName(e.kind));
+                        if (!e.why.empty()) ImGui::TextColored({0.95f, 0.75f, 0.35f, 1}, "%s ; particules sans texture", e.why.c_str());
+                        std::string t;
+                        for (auto& x : e.textures) t += (t.empty() ? "" : ", ") + x;
+                        if (!t.empty()) ImGui::TextDisabled("Textures : %s", t.c_str());
+                        std::string m;
+                        for (auto& x : e.modules) m += (m.empty() ? "" : ", ") + x;
+                        if (!m.empty()) ImGui::TextDisabled("Modules : %s", m.c_str());
+                        if (!ed.showEffects) ImGui::TextDisabled("(case « Effets » décochée : particules cachées)");
+                    }
+                } else
+                    ImGui::TextDisabled("Affiché comme une boîte de couleur ; rien à corriger.");
             } else if (ms->st == ModelSlot::None) {
                 ImGui::TextDisabled("Pas de modèle : %s", ms->why.c_str());
                 // (pour tout modèle illisible, pas seulement les meshlets : la raison affichée suffit à trier ensuite)
@@ -717,6 +733,9 @@ void viewport(Editor& ed) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Montrer aussi les anneaux rouge (axe X) et bleu (axe Z) pour pencher les objets");
     ImGui::SameLine();
     ImGui::Checkbox("Noms", &ed.showLabels);
+    ImGui::SameLine();
+    ImGui::Checkbox("Effets", &ed.showEffects);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Particules des emplacements d'effet (EftLoc) : feuilles, brume, rides, embruns, lueurs…\nTextures du jeu, mouvement d'après la famille de l'effet");
     fl.end();
     if (!ed.bake.empty()) {
         fl.begin();
