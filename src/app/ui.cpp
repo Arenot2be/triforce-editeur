@@ -116,6 +116,20 @@ std::string modelStandIns(Editor& ed, const ModelSlot& s) {
     return out.empty() ? out : out + "\n";
 }
 
+// (ce qu'est un acteur que le jeu n'affiche pas avec un modèle, d'après son nom)
+std::string noModelKind(const std::string& n) {
+    auto has = [&](const char* k) { return n.find(k) != std::string::npos; };
+    if (n.rfind("EftLoc", 0) == 0)
+        return "Emplacement d'effet visuel (" + std::string(has("Fog") ? "brume" : has("Ripple") ? "ondulations sur l'eau" : has("Water") ? "eau, gouttes, cascade" :
+                                                      has("Leaf") ? "feuilles qui tombent" : has("Insect") || has("Fly") ? "insectes" : "particules") +
+               ") : le jeu y crée des particules, il n'a pas de modèle 3D. C'est normal.";
+    if (has("AirWall")) return "Mur invisible : il bloque le joueur, la caméra ou les personnages, sans rien afficher. C'est normal.";
+    if (has("Area") || has("NavMeshCut")) return "Zone invisible (déclencheur, changement de règle, découpe de navigation) : pas de modèle. C'est normal.";
+    if (has("Anchor") || has("StartPos") || has("Destination") || has("LookAttention"))
+        return "Repère invisible (point de départ, destination, ancre de caméra ou de carte) : pas de modèle. C'est normal.";
+    return "Acteur sans modèle 3D (zone, repère ou effet) : le jeu ne l'affiche pas comme un objet. C'est normal.";
+}
+
 // (bouton « chercher dans tout le jeu », ou l'avancement de la recherche en cours)
 void searchButton(Editor& ed) {
     auto s = ed.texSearch;
@@ -361,6 +375,10 @@ void rightPanel(Editor& ed) {
                         ImGui::SetClipboardText(all.c_str());
                     }
                 }
+            } else if (ms->st == ModelSlot::None && ms->why.rfind("pas de ModelInfo", 0) == 0) {
+                // (acteur sans modèle par nature : on dit ce que c'est, sans alarme)
+                ImGui::TextWrapped("%s", noModelKind(n).c_str());
+                ImGui::TextDisabled("Affiché comme une boîte de couleur ; rien à corriger.");
             } else if (ms->st == ModelSlot::None) {
                 ImGui::TextDisabled("Pas de modèle : %s", ms->why.c_str());
                 // (pour tout modèle illisible, pas seulement les meshlets : la raison affichée suffit à trier ensuite)
