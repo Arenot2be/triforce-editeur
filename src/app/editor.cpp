@@ -175,6 +175,7 @@ void Editor::openMap(const std::string& rel) {
         fitAll();
         std::string sc = autoTerrain();
         if (sc != terrainScene) setTerrain(sc);
+        try { bake = bakeLoad(*game, bakePrefix(rel), &bakeStatus); } catch (const std::exception& e) { bake.clear(); bakeStatus = e.what(); }
         say("Carte ouverte : " + rel + (doc.origin == "travail" ? " (ta version modifiée)" : " (version du jeu)"));
     } catch (const std::exception& e) {
         mapError = e.what();
@@ -623,7 +624,26 @@ void Editor::render(VkCommandBuffer c) {
                         auto& s = g->subs[i];
                         sets[i] = {ready(s.tex), ready(s.tex2), ready(s.detail)};
                     }
-                    rend.drawMesh(c, *g, pc, sets);
+                    // (éclairage précalculé de cet objet, d'après son Hash : la carte de sa case et la place de chaque partie)
+                    Renderer::Bake bk;
+                    const Renderer::Bake* bkp = nullptr;
+                    if (showBake && showTextures && !bake.empty())
+                        if (const Value* hv = r->value.get("Hash"))
+                            if (hv->t == T::U64 || hv->t == T::U32 || hv->t == T::I64) {
+                                uint64_t h = hv->t == T::U64 ? hv->u : uint64_t(hv->i);
+                                auto it = bake.find(h);
+                                if (it != bake.end() && (bk.map = ready(it->second.tex))) {
+                                    bk.sub.assign(g->subs.size(), {0, 0, 0, 0});
+                                    for (size_t i = 0; i < g->subs.size(); i++)
+                                        for (auto& bm : it->second.mats)
+                                            if (bm.material == g->subs[i].mat || (bm.material.empty() && bm.index == g->subs[i].matIndex)) {
+                                                bk.sub[i] = {bm.off[0], bm.off[1], bm.scale[0], bm.scale[1]};
+                                                break;
+                                            }
+                                    bkp = &bk;
+                                }
+                            }
+                    rend.drawMesh(c, *g, pc, sets, false, bkp);
                     if (g->translucent) late.push_back({g, pc, sets});
                 } else {
                     bool quiet = false;
@@ -877,7 +897,7 @@ TexSlot* Editor::texture(const std::string& name) {
             }
             r->t = bntxExtract(g->readTex(rel), 1024, want);
             if (r->t.code == 5 || r->t.code == 6) r->kind = 2;   // (BC4, BC5 : masques ou reliefs, pas des couleurs)
-            else if (r->t.code == 8) throw Error("format BC6H (HDR) non affiché");
+            // (BC6H : images en virgule flottante, comme les cartes d'éclairage précalculé ; envoyées telles quelles)
             else if (r->t.code >= 20) {
                 int i = r->t.code - 20;
                 r->rgba = astcDecode(r->t.blocks.data(), r->t.blocks.size(), r->t.w, r->t.h, ASTC_DIMS[i][0], ASTC_DIMS[i][1], r->t.srgb, true, true, &r->st);
@@ -914,9 +934,10 @@ TexSlot* Editor::texture(const std::string& name) {
                 case 5: f = r->t.format.find("sign") != std::string::npos ? VK_FORMAT_BC4_SNORM_BLOCK : VK_FORMAT_BC4_UNORM_BLOCK; break;
                 case 6: f = r->t.format.find("sign") != std::string::npos ? VK_FORMAT_BC5_SNORM_BLOCK : VK_FORMAT_BC5_UNORM_BLOCK; break;
                 case 7: f = VK_FORMAT_BC7_UNORM_BLOCK; break;
+                case 8: f = r->t.format.find("sign") != std::string::npos ? VK_FORMAT_BC6H_SFLOAT_BLOCK : VK_FORMAT_BC6H_UFLOAT_BLOCK; break;
                 default: f = VK_FORMAT_R8G8B8A8_UNORM; data = r->rgba.data(); size = r->rgba.size(); mips = true; break;
             }
-            if (r->t.code >= 2 && r->t.code <= 7 && !(vk.bc && vk.formatOk(f))) {
+            if (r->t.code >= 2 && r->t.code <= 8 && !(vk.bc && vk.formatOk(f))) {
                 if (mask) { s2.st = TexSlot::Mask; s2.why = "masque ou relief (" + r->t.format + ")"; return; }
                 s2.st = TexSlot::None;
                 s2.why = "format " + r->t.format + " refusé par la carte graphique";

@@ -697,6 +697,12 @@ void viewport(Editor& ed) {
     ImGui::SameLine();
     ImGui::Checkbox("Noms", &ed.showLabels);
     fl.end();
+    if (!ed.bake.empty()) {
+        fl.begin();
+        ImGui::Checkbox("Éclairage du jeu", &ed.showBake);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Éclairage précalculé par le jeu (Bake/Scene) :\n%s", ed.bakeStatus.c_str());
+        fl.end();
+    }
     ImGui::EndChild();
     ImGui::PopStyleColor();
 

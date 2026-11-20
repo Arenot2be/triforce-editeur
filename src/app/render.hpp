@@ -21,7 +21,7 @@ static_assert(sizeof(PC) == 128, "constantes de 128 octets");
 struct GpuMesh {
     VkBuf vb, ib;
     struct Sub { uint32_t start, count; std::string tex; int kind = 0; std::string nrm, flow;
-                 std::string tex2, detail, mat; };   // (kind 4 : couche posée par-dessus, opacité des sommets)
+                 std::string tex2, detail, mat; int matIndex = 0; };   // (kind 4 : couche posée par-dessus, opacité des sommets)
     std::vector<Sub> subs;
     bool translucent = false;   // (a des parties d'eau, de fondu ou de verre)
     float bbox[6] = {0, 0, 0, 0, 0, 0};
@@ -68,7 +68,10 @@ public:
     // sinon tout sauf elles
     // (tex : par partie, couleur, seconde couleur, détail ; VK_NULL_HANDLE = sans)
     using SubTex = std::array<VkDescriptorSet, 3>;
-    void drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<SubTex>& tex, bool translucent = false);
+    // (éclairage précalculé d'un objet : sa carte, et pour chaque partie la place de ses coordonnées dans la carte —
+    //  décalage u, v puis échelle u, v ; échelle nulle : partie non éclairée)
+    struct Bake { VkDescriptorSet map = VK_NULL_HANDLE; std::vector<std::array<float, 4>> sub; float strength = 1.f; };
+    void drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<SubTex>& tex, bool translucent = false, const Bake* bake = nullptr);
     // (parties d'eau : leur carte de normales par partie, `signedNrm` si la carte est signée ; time en secondes)
     void drawWater(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<VkDescriptorSet>& nrm,
                    const std::vector<VkDescriptorSet>& flow, const std::vector<char>& signedNrm, float time);

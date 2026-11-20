@@ -13,6 +13,7 @@
 #include "core/terrain.hpp"
 #include "core/textmap.hpp"
 #include "core/texsearch.hpp"
+#include "core/bake.hpp"
 
 using namespace te;
 
@@ -67,6 +68,18 @@ int main(int argc, char** argv) {
                     TexData t = bntxExtract(g.readTex(u), 64, s.names[k]);
                     std::printf("lu : %s %dx%d %s\n", s.names[k].c_str(), t.w, t.h, t.format.c_str());
                 }
+        } else if (cmd == "bake") {   // romfs scène -> éclairage précalculé lu
+            Game g(u8path(argv[2]));
+            std::string st;
+            auto m = bakeLoad(g, argv[3], &st);
+            std::printf("%s\n", st.c_str());
+            int k = 0;
+            for (auto& [h, e] : m) {
+                if (k++ >= 5) break;
+                std::printf("%llu %s %s", (unsigned long long)h, e.model.c_str(), e.tex.c_str());
+                for (auto& bm : e.mats) std::printf(" [%s %d %.3f %.3f %.4f %.4f]", bm.material.c_str(), bm.index, bm.off[0], bm.off[1], bm.scale[0], bm.scale[1]);
+                std::printf("\n");
+            }
         } else if (cmd == "mc") {   // .bfres.mc -> BFRES et tampons décodés
             out(meshCodecUnpack(readFile(u8path(argv[2]))), argv[3]);
         } else if (cmd == "bntx") {

@@ -6,22 +6,28 @@
 //  - seconde couleur (la mousse…) posée sur les surfaces tournées vers le haut (normale du modèle), avec un bord
 //    irrégulier tiré de la luminosité de la mousse ;
 //  - couche posée par-dessus (matériaux « _sl ») : opacité dans l'alpha des sommets.
-// pc.scale.w : 1 couleur, 2 seconde couleur, 4 détail, 8 couche par-dessus
+//  - éclairage précalculé du jeu (Bake/Scene : carte d'éclairage de la case de grille de l'objet), qui remplace alors
+//    l'éclairage simple de l'éditeur.
+// pc.scale.w : 1 couleur, 2 seconde couleur, 4 détail, 8 couche par-dessus, 16 éclairage précalculé (pc.color :
+// décalage u, v et échelle u, v de la coordonnée « bake » dans la carte)
 layout(set = 0, binding = 0) uniform sampler2D uTex;
 layout(set = 1, binding = 0) uniform sampler2D uTex2;
 layout(set = 2, binding = 0) uniform sampler2D uDetail;
+layout(set = 3, binding = 0) uniform sampler2D uLight;
 layout(location = 0) in vec2 vUv;
 layout(location = 1) in vec3 vW;
 layout(location = 2) in vec4 vCol;
 layout(location = 3) in vec3 vN;
+layout(location = 4) in vec2 vBake;
 layout(location = 0) out vec4 outColor;
 void main() {
     int flags = int(pc.scale.w + 0.5);
     vec3 nf = normalize(cross(dFdx(vW), dFdy(vW)));
     bool hasN = dot(vN, vN) > 1e-6;
     vec3 n = hasN ? normalize(vN) : nf;
-    vec4 c = pc.color;
-    float alpha = pc.color.a;
+    bool lm = (flags & 16) != 0 && vBake.x >= 0.0;
+    vec4 c = (flags & 1) != 0 ? vec4(1.0) : pc.color;
+    float alpha = (flags & 1) != 0 ? 1.0 : pc.color.a;
     if ((flags & 1) != 0) {
         c = texture(uTex, vUv);
         if ((flags & 8) == 0 && c.a < 0.35) discard;
@@ -48,6 +54,11 @@ void main() {
     // (éclairage précalculé des sommets quand le modèle en a : il remplace en partie l'éclairage simple de l'éditeur)
     float baked = clamp(vCol.r, 0.0, 2.5);
     vec3 col = c.rgb * mix(lit, lit * baked * 1.15, 0.7);
+    if (lm) {
+        vec3 L2 = texture(uLight, vBake * pc.color.zw + pc.color.xy).rgb;
+        // (lumière reçue, précalculée par le jeu : on garde un peu du relief de l'éclairage simple)
+        col = c.rgb * (L2 * 1.5 + 0.06) * (0.85 + 0.15 * lit);
+    }
     if (pc.pos.w > 0.5) col = mix(col, vec3(1.0, 0.82, 0.3), pc.pos.w > 1.5 ? 0.18 : 0.38);
     outColor = vec4(col, alpha);
 }

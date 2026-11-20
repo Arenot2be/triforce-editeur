@@ -502,6 +502,7 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 if (l.find("detailmap") != std::string::npos) { if (s.detail.empty()) s.detail = n; }
                 else if (l.rfind("cmntex_", 0) != 0 && s.tex2.empty()) s.tex2 = n;
             }
+        s.matIndex = matIdx;
         if (!tex.empty() && endsWith(lower(s.material), "_sl")) s.kind = 4;
         if (tex.empty()) s.kind = surfaceKind(s.material, size_t(matIdx) < materials.size() ? materials[size_t(matIdx)] : std::vector<std::string>{});
         // (eau : sa carte de normales, pour les vagues)
@@ -551,6 +552,7 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                     m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2]);
                     m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2 + 1]);
                     m.colors.insert(m.colors.end(), {1.f, 1.f, 1.f, 1.f});
+                    m.bakeUvs.insert(m.bakeUvs.end(), {-1.f, -1.f});
                     m.normals.insert(m.normals.end(), {0.f, 0.f, 0.f});
                 }
                 for (uint32_t v : ids) m.indices.push_back(base + v);
@@ -589,7 +591,7 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
             if (ua && ua != pa && ua->buffer < bufs.size()) {
                 try { uvs = attrValues(r, bufs[ua->buffer], *ua, vcount); } catch (...) { uvs.clear(); }
             }
-            std::vector<std::array<double, 4>> cols, nrms;
+            std::vector<std::array<double, 4>> cols, nrms, bakes;
             bool colLight = false;   // (couleur des sommets en demi-flottants, grise, autour de 1 : éclairage précalculé)
             for (auto& a : attrs) {
                 if (a.named && a.name == "_c0" && a.buffer < bufs.size() && cols.empty()) {
@@ -602,6 +604,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                         colLight = grey && mean > 0.3 && mean < 2.5;
                     }
                 }
+                if (a.named && a.name == "bake" && a.buffer < bufs.size() && bakes.empty())
+                    try { bakes = attrValues(r, bufs[a.buffer], a, vcount); } catch (...) { bakes.clear(); }
                 if (a.named && a.name == "_n0" && a.buffer < bufs.size() && nrms.empty())
                     try { nrms = attrValues(r, bufs[a.buffer], a, vcount); } catch (...) { nrms.clear(); }
             }
@@ -654,6 +658,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 m.positions.push_back(float(x)); m.positions.push_back(float(y)); m.positions.push_back(float(z));
                 m.uvs.push_back(uvs.empty() ? 0.f : float(uvs[k][0]));
                 m.uvs.push_back(uvs.empty() ? 0.f : float(uvs[k][1]));
+                if (bakes.size() == vcount) m.bakeUvs.insert(m.bakeUvs.end(), {float(bakes[k][0]), float(bakes[k][1])});
+                else m.bakeUvs.insert(m.bakeUvs.end(), {-1.f, -1.f});
                 if (nrms.size() == vcount) {
                     double a = nrms[k][0], b = nrms[k][1], c = nrms[k][2];
                     if (!mats.empty()) {

@@ -82,21 +82,21 @@ void Renderer::init() {
     lc.pPushConstantRanges = &r;
     check(vkCreatePipelineLayout(vk.dev, &lc, nullptr, &layout), "vkCreatePipelineLayout");
     {
-        VkDescriptorSetLayout sets[3] = {vk.texLayout, vk.texLayout, vk.texLayout};
+        VkDescriptorSetLayout sets[4] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout};
         VkPipelineLayoutCreateInfo ml = lc;
-        ml.setLayoutCount = 3;
+        ml.setLayoutCount = 4;
         ml.pSetLayouts = sets;
         check(vkCreatePipelineLayout(vk.dev, &ml, nullptr, &meshLayout), "vkCreatePipelineLayout (modèles)");
         VkPipelineLayout keep = layout;
         layout = meshLayout;
         // (sommet : position, coordonnées de texture, couleur du jeu)
-        meshPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 48,
+        meshPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 56,
                             {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 20},
-                             {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}},
+                             {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}, {4, 0, VK_FORMAT_R32G32_SFLOAT, 48}},
                             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
-        meshBlendPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 48,
+        meshBlendPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 56,
                                  {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 20},
-                             {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}},
+                             {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}, {4, 0, VK_FORMAT_R32G32_SFLOAT, 48}},
                                  VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false, false, true);
         layout = keep;
     }
@@ -108,7 +108,7 @@ void Renderer::init() {
         check(vkCreatePipelineLayout(vk.dev, &wl, nullptr, &waterLayout), "vkCreatePipelineLayout (eau)");
         VkPipelineLayout keep = layout;
         layout = waterLayout;
-        waterPipe = pipeline(SPV_WATER_VERT, sizeof SPV_WATER_VERT, SPV_WATER_FRAG, sizeof SPV_WATER_FRAG, 48,
+        waterPipe = pipeline(SPV_WATER_VERT, sizeof SPV_WATER_VERT, SPV_WATER_FRAG, sizeof SPV_WATER_FRAG, 56,
                              {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true,
                              false, false, true);
         layout = keep;
@@ -152,9 +152,9 @@ void Renderer::init() {
 GpuMesh Renderer::upload(const Mesh& m) {
     GpuMesh g;
     size_t nv = m.positions.size() / 3;
-    std::vector<float> v(nv * 12);
+    std::vector<float> v(nv * 14);
     for (size_t i = 0; i < nv; i++) {
-        float* o = &v[i * 12];
+        float* o = &v[i * 14];
         std::memcpy(o, &m.positions[i * 3], 12);
         o[3] = i * 2 < m.uvs.size() ? m.uvs[i * 2] : 0.f;
         o[4] = i * 2 + 1 < m.uvs.size() ? m.uvs[i * 2 + 1] : 0.f;
@@ -162,12 +162,14 @@ GpuMesh Renderer::upload(const Mesh& m) {
         else { o[5] = o[6] = o[7] = 1.f; o[8] = 1.f; }
         if (i * 3 + 2 < m.normals.size()) std::memcpy(o + 9, &m.normals[i * 3], 12);
         else o[9] = o[10] = o[11] = 0.f;
+        if (i * 2 + 1 < m.bakeUvs.size()) { o[12] = m.bakeUvs[i * 2]; o[13] = m.bakeUvs[i * 2 + 1]; }
+        else o[12] = o[13] = -1.f;
     }
     g.vb = vk.upload(v.data(), v.size() * 4, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     g.ib = vk.upload(m.indices.data(), m.indices.size() * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     for (auto& s : m.subs) {
         int kind = s.tex.empty() ? s.kind : (s.kind == 4 ? 4 : 0);
-        g.subs.push_back({s.start, s.count, s.tex, kind, s.nrm, s.flow, s.tex2, s.detail, s.material});
+        g.subs.push_back({s.start, s.count, s.tex, kind, s.nrm, s.flow, s.tex2, s.detail, s.material, s.matIndex});
         if (kind) g.translucent = true;
     }
     std::memcpy(g.bbox, m.bbox, sizeof g.bbox);
@@ -235,7 +237,7 @@ void Renderer::bindMesh(VkCommandBuffer c) {
     vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipe);
 }
 
-void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<SubTex>& tex, bool translucent) {
+void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<SubTex>& tex, bool translucent, const Bake* bake) {
     if (translucent && !g.translucent) return;
     VkDeviceSize off = 0;
     vkCmdBindVertexBuffers(c, 0, 1, &g.vb.buf, &off);
@@ -255,11 +257,14 @@ void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const
             p.color[0] = 0.33f; p.color[1] = 0.26f; p.color[2] = 0.2f;
         }
         SubTex t = i < tex.size() ? tex[i] : SubTex{};
-        VkDescriptorSet sets[3] = {t[0] ? t[0] : white.set, t[1] ? t[1] : white.set, t[2] ? t[2] : white.set};
-        // (scale.w : 1 couleur, 2 seconde couleur, 4 détail, 8 couche par-dessus)
-        int flags = (t[0] ? 1 : 0) | (t[0] && t[1] ? 2 : 0) | (t[0] && t[2] ? 4 : 0) | (kind == 4 ? 8 : 0);
+        bool lm = bake && bake->map && i < bake->sub.size() && bake->sub[i][2] > 0.f && t[0] && kind != 4;
+        VkDescriptorSet sets[4] = {t[0] ? t[0] : white.set, t[1] ? t[1] : white.set, t[2] ? t[2] : white.set, lm ? bake->map : white.set};
+        // (scale.w : 1 couleur, 2 seconde couleur, 4 détail, 8 couche par-dessus, 16 éclairage précalculé : pc.color =
+        //  décalage et échelle dans la carte, inutilisé sinon par les parties texturées)
+        int flags = (t[0] ? 1 : 0) | (t[0] && t[1] ? 2 : 0) | (t[0] && t[2] ? 4 : 0) | (kind == 4 ? 8 : 0) | (lm ? 16 : 0);
+        if (lm) for (int q = 0; q < 4; q++) p.color[q] = bake->sub[i][size_t(q)];
         p.scale[3] = float(flags);
-        vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, meshLayout, 0, 3, sets, 0, nullptr);
+        vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, meshLayout, 0, 4, sets, 0, nullptr);
         vkCmdPushConstants(c, meshLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p);
         vkCmdDrawIndexed(c, g.subs[i].count, 1, g.subs[i].start, 0, 0);
     }

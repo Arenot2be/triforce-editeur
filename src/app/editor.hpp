@@ -13,6 +13,7 @@
 
 #include "app/math.hpp"
 #include "app/render.hpp"
+#include "core/bake.hpp"
 #include "core/texsearch.hpp"
 #include "core/bntx.hpp"
 #include "core/mapdoc.hpp"
@@ -170,6 +171,10 @@ public:
     TexSlot* texture(const std::string& name);
     std::vector<std::string> scenes;
     std::string terrainScene;   // ("" : aucun)
+    // -- éclairage précalculé de la carte (Bake/Scene/<scène>_G_*.bkres.zs), par Hash d'objet
+    std::map<uint64_t, BakeEntry> bake;
+    std::string bakeStatus;
+    bool showBake = true;
     std::vector<TerrainTile> tiles;
     std::string terrainStatus;
     std::string terrainMatStatus, terrainCmbStatus;   // (textures du sol : Tex/MaterialAlb, relief : Tex/MaterialCmb)
