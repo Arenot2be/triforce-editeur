@@ -55,9 +55,11 @@ void main() {
     float baked = clamp(vCol.r, 0.0, 2.5);
     vec3 col = c.rgb * mix(lit, lit * baked * 1.15, 0.7);
     if (lm) {
-        vec3 L2 = texture(uLight, vBake * pc.color.zw + pc.color.xy).rgb;
-        // (lumière reçue, précalculée par le jeu : on garde un peu du relief de l'éclairage simple)
-        col = c.rgb * (L2 * 1.5 + 0.06) * (0.85 + 0.15 * lit);
+        // (carte du jeu, deux canaux : r = lumière du ciel reçue (occlusion ambiante), g = soleil reçu (ombres portées))
+        vec2 B = texture(uLight, vBake * pc.color.zw + pc.color.xy).rg;
+        float ndl = hasN ? max(dot(n, L), 0.0) : abs(dot(n, L));
+        vec3 sky = vec3(0.62, 0.67, 0.74), sun = vec3(1.0, 0.94, 0.82) * 0.8;
+        col = c.rgb * (0.06 + sky * B.r * 1.15 + sun * B.g * mix(0.45, 1.0, ndl));
     }
     if (pc.pos.w > 0.5) col = mix(col, vec3(1.0, 0.82, 0.3), pc.pos.w > 1.5 ? 0.18 : 0.38);
     outColor = vec4(col, alpha);

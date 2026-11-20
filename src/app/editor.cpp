@@ -632,7 +632,10 @@ void Editor::render(VkCommandBuffer c) {
                             if (hv->t == T::U64 || hv->t == T::U32 || hv->t == T::I64) {
                                 uint64_t h = hv->t == T::U64 ? hv->u : uint64_t(hv->i);
                                 auto it = bake.find(h);
-                                if (it != bake.end() && (bk.map = ready(it->second.tex))) {
+                                TexSlot* lt = it != bake.end() ? texture(it->second.tex) : nullptr;
+                                // (cartes d'éclairage en BC5 : rangées comme « masques », mais bien utilisables ici)
+                                if (lt && (lt->st == TexSlot::Ok || lt->st == TexSlot::Mask) && lt->tex.set) bk.map = lt->tex.set;
+                                if (bk.map) {
                                     bk.sub.assign(g->subs.size(), {0, 0, 0, 0});
                                     for (size_t i = 0; i < g->subs.size(); i++)
                                         for (auto& bm : it->second.mats)
@@ -895,7 +898,8 @@ TexSlot* Editor::texture(const std::string& name) {
                 throw Error("introuvable : ni Tex/" + name + ".bntx.zs, ni dans un autre fichier de Tex/" +
                             (where.empty() ? std::string(" ; aucun fichier du jeu ne porte ce nom") : " ; fichiers à ce nom : " + where));
             }
-            r->t = bntxExtract(g->readTex(rel), 1024, want);
+            // (cartes d'éclairage précalculé : en entier, ce sont des atlas où chaque objet n'a que quelques pixels)
+            r->t = bntxExtract(g->readTex(rel), want.rfind("RBake_", 0) == 0 ? 4096 : 1024, want);
             if (r->t.code == 5 || r->t.code == 6) r->kind = 2;   // (BC4, BC5 : masques ou reliefs, pas des couleurs)
             // (BC6H : images en virgule flottante, comme les cartes d'éclairage précalculé ; envoyées telles quelles)
             else if (r->t.code >= 20) {
@@ -946,7 +950,7 @@ TexSlot* Editor::texture(const std::string& name) {
             try {
                 s2.tex = vk.texture(f, r->t.w, r->t.h, data, size, swz, mips);
                 s2.st = mask ? TexSlot::Mask : TexSlot::Ok;
-                if (mask) s2.why = "masque ou relief (" + r->t.format + ")";
+                if (mask) s2.why = (name.rfind("RBake_", 0) == 0 ? "carte d'éclairage précalculé (" : "masque ou relief (") + r->t.format + ")";
             } catch (const std::exception& e) {
                 s2.st = TexSlot::None;
                 s2.why = e.what();

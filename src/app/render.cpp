@@ -257,7 +257,7 @@ void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const
             p.color[0] = 0.33f; p.color[1] = 0.26f; p.color[2] = 0.2f;
         }
         SubTex t = i < tex.size() ? tex[i] : SubTex{};
-        bool lm = bake && bake->map && i < bake->sub.size() && bake->sub[i][2] > 0.f && t[0] && kind != 4;
+        bool lm = bake && bake->map && i < bake->sub.size() && bake->sub[i][2] > 0.f && t[0];
         VkDescriptorSet sets[4] = {t[0] ? t[0] : white.set, t[1] ? t[1] : white.set, t[2] ? t[2] : white.set, lm ? bake->map : white.set};
         // (scale.w : 1 couleur, 2 seconde couleur, 4 détail, 8 couche par-dessus, 16 éclairage précalculé : pc.color =
         //  décalage et échelle dans la carte, inutilisé sinon par les parties texturées)
