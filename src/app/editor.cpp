@@ -974,6 +974,17 @@ void Editor::emitGround(const V3& eye, const V3& camR, const V3& camU) {
         FxBatch b;
         b.first = uint32_t(rend.fx.size());
         b.mode = blades ? 7 : 0;
+        // (textures du jeu pour ces couches, quand elles se lisent : les modèles Foliage.Foliage*.bfres ne sont que des
+        // boîtes vides, la forme vient du nuanceur ; seules leurs textures disent l'aspect)
+        const char* tn = moss ? "Foliage_Moss_Alb" : turf ? "Foliage_Turf_Alb" : stone ? "Foliage_Stone_Alb" : "Foliage_ShootLeaf_Alb";
+        if (showTextures)
+            if (TexSlot* t = texture(tn, true); t && t->st == TexSlot::Ok && t->tex.set) { b.tex = t->tex.set; b.mode = 1; }
+        bool textured = b.tex != VK_NULL_HANDLE;
+        auto tint = [&](float r, float g, float bl, float v, float out[3]) {
+            if (textured) { out[0] = out[1] = out[2] = std::min(1.f, v); }
+            else { out[0] = r * v; out[1] = g * v; out[2] = bl * v; }
+        };
+        float col[3];
         for (auto& cell : L.cells) {
             V3 cc(cell.c[0], cell.c[1], cell.c[2]);
             if (len(cc - eye) > R + 3.5) continue;
@@ -994,11 +1005,13 @@ void Editor::emitGround(const V3& eye, const V3& camR, const V3& camU) {
                     if (moss) {
                         double sz = 0.16 + g.a4 / 255.0 * 0.7 + r2 * 0.08;
                         float v = 0.8f + 0.35f * r2;
-                        fxQuad(rend.fx, p + up * 0.015, a1 * sz, a2 * sz, 0.23f * v, 0.33f * v, 0.1f * v, 0.85f * fade);
+                        tint(0.23f, 0.33f, 0.1f, v, col);
+                        fxQuad(rend.fx, p + up * 0.015, a1 * sz, a2 * sz, col[0], col[1], col[2], (textured ? 1.f : 0.85f) * fade);
                     } else {
                         double sz = 0.04 + g.a4 / 255.0 * 0.14;
                         float v = 0.75f + 0.4f * r2;
-                        fxQuad(rend.fx, p + up * (sz * 0.4), a1 * sz, a2 * (sz * 0.8), 0.45f * v, 0.43f * v, 0.39f * v, fade);
+                        tint(0.45f, 0.43f, 0.39f, v, col);
+                        fxQuad(rend.fx, p + up * (sz * 0.4), a1 * sz, a2 * (sz * 0.8), col[0], col[1], col[2], fade);
                     }
                 } else {
                     // (touffe : quelques brins inclinés, tournés vers la caméra autour de leur axe)
@@ -1014,7 +1027,8 @@ void Editor::emitGround(const V3& eye, const V3& camR, const V3& camU) {
                         side = norm(side) * (turf ? 0.018 : 0.035);
                         float v = 0.75f + 0.4f * q2;
                         float rr = turf ? 0.33f : 0.3f + 0.08f * float(g.kind % 3), gg = turf ? 0.5f : 0.45f, bb = turf ? 0.14f : 0.13f;
-                        fxQuad(rend.fx, p + off + bu * (h * 0.5), side, bu * (h * 0.5), rr * v, gg * v, bb * v, fade);
+                        tint(rr, gg, bb, v, col);
+                        fxQuad(rend.fx, p + off + bu * (h * 0.5), textured ? side * 1.6 : side, bu * (h * 0.5), col[0], col[1], col[2], fade);
                     }
                 }
             }
