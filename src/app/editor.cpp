@@ -616,10 +616,15 @@ void Editor::render(VkCommandBuffer c) {
                 auto& cc = catColor[catOf(name)];
                 pc.color[0] = cc[0]; pc.color[1] = cc[1]; pc.color[2] = cc[2]; pc.color[3] = 1;
                 // (effets de particules : dessinés en plus de la boîte, s'ils sont assez près)
-                if (showEffects && showModels && name.rfind("EftLoc", 0) == 0 && len(p - eye) < 220 && rend.fx.size() < 120000)
-                    if (FxSlot* fs = effect(name); fs && fs->ready)
-                        emitFx(*fs, p, eulerMat(ro), s, uint32_t(reinterpret_cast<uintptr_t>(r.get()) >> 4), fxTime, camR, camU);
                 ModelSlot* ms = showModels && !name.empty() ? model(name) : nullptr;
+                // (effets permanents : emplacements EftLoc, et objets dont l'effet tourne en continu — insectes, bougies…)
+                if (showEffects && showModels && !name.empty() && len(p - eye) < 220 && rend.fx.size() < 120000) {
+                    bool place = name.rfind("EftLoc", 0) == 0;
+                    if (place || len(p - eye) < 120)
+                        if (FxSlot* fs = effect(name); fs && fs->ready && fs->info.ambient && (place || !fs->info.file.empty()))
+                            emitFx(*fs, p, eulerMat(ro), s, uint32_t(reinterpret_cast<uintptr_t>(r.get()) >> 4), fxTime, camR, camU,
+                                   !place, ms && ms->st == ModelSlot::Ok ? ms->gpu.bbox : nullptr);
+                }
                 const GpuMesh* g = &rend.cube;
                 const float* bb = rend.cube.bbox;
                 if (ms && ms->st == ModelSlot::Ok) {
@@ -862,9 +867,12 @@ Editor::FxSlot* Editor::effect(const std::string& actor) {
     if (!game) return nullptr;
     FxSlot& s = fxSlots[actor];
     Game* g = game.get();
-    jobs.add(1, [this, actor, g]() -> std::function<void()> {
+    ModelIndex* mi = models.get();
+    jobs.add(1, [this, actor, g, mi]() -> std::function<void()> {
         auto e = std::make_shared<EffectInfo>();
-        try { *e = effectLoad(*g, actor); } catch (const std::exception& x) { e->actor = actor; e->why = x.what(); }
+        std::string model;
+        if (mi) try { if (auto inf = mi->info(actor)) model = inf->first; } catch (...) {}
+        try { *e = effectLoad(*g, actor, model); } catch (const std::exception& x) { e->actor = actor; e->why = x.what(); }
         return [this, actor, e] {
             auto it2 = fxSlots.find(actor);
             if (it2 == fxSlots.end()) return;
@@ -884,7 +892,8 @@ static float fxRand(uint32_t a, uint32_t b, uint32_t c) {
 // Particules d'un effet placé, recalculées à chaque image d'après le temps (sans état : chaque particule suit un
 // cycle de vie qui recommence, décalé au hasard). Le mouvement suit la famille de l'effet ; tailles en mètres,
 // volumes multipliés par l'échelle de l'acteur, orientés comme lui.
-void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint32_t seed, float time, const V3& camR, const V3& camU) {
+void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint32_t seed, float time, const V3& camR, const V3& camU,
+                    bool attached, const float* bbox) {
     const EffectInfo& e = f.info;
     auto tex = [&](const std::string& n) -> VkDescriptorSet {
         if (n.empty() || !showTextures) return VK_NULL_HANDLE;
@@ -908,6 +917,51 @@ void Editor::emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint
     };
     auto fade = [](float f, float in, float out) { return std::min(1.f, f / in) * std::min(1.f, (1 - f) / out); };
     double sc = std::max(0.2, (std::fabs(s.x) + std::fabs(s.y) + std::fabs(s.z)) / 3);
+    // (effet porté par un objet : à sa taille, sur l'objet lui-même)
+    if (attached && (e.kind == FxKind::Fire || e.kind == FxKind::Glow)) {
+        double top = bbox ? double(bbox[4]) : 0.3, cx = bbox ? 0.5 * (bbox[0] + bbox[3]) : 0, cz = bbox ? 0.5 * (bbox[2] + bbox[5]) : 0;
+        auto halo = [&](const V3& c, double size, float r, float g, float bl, float a) {
+            FxBatch h;
+            h.first = uint32_t(rend.fx.size());
+            h.additive = true;
+            h.tex = tex(e.mask);
+            h.mode = h.tex ? 6 : 0;
+            auto [ax, ay] = bill(c, size, 0);
+            quad(c, ax, ay, r, g, bl, a);
+            h.count = uint32_t(rend.fx.size()) - h.first;
+            if (h.count) rend.fxBatches.push_back(h);
+        };
+        if (e.kind == FxKind::Fire) {
+            // (flamme de bougie au sommet de l'objet : texture de flamme du jeu, vacillante, et son halo)
+            V3 c = local(cx, top + 0.03 / std::max(0.2, std::fabs(s.y)), cz);
+            double fl = 1 + 0.12 * std::sin(time * 13 + seed % 7) + 0.06 * std::sin(time * 29 + seed % 5);
+            b.additive = true;
+            b.tex = tex(e.color);
+            b.mode = b.tex ? 1 : 0;
+            V3 up = norm(matVec(R, V3(0, 1, 0)));
+            V3 side = norm(cross(up, cross(camR, camU)));
+            if (len(side) < 0.5) side = camR;
+            quad(c + up * (0.035 * sc * fl), side * (0.018 * sc), up * (0.04 * sc * fl), 1.f, 0.85f, 0.6f, 0.95f);
+            b.count = uint32_t(rend.fx.size()) - b.first;
+            if (b.count) rend.fxBatches.push_back(b);
+            halo(c + up * (0.04 * sc), 0.22 * sc * fl, 1.f, 0.62f, 0.25f, 0.35f);
+        } else {
+            // (insecte lumineux ou lueur : un point qui vagabonde autour de l'objet, et son halo)
+            double ph = (seed % 1000) * 0.00628;
+            V3 c = local(cx + std::sin(time * 0.7 + ph) * 0.8 + std::sin(time * 1.9 + ph * 3) * 0.2, top * 0.5 + 0.4 + std::sin(time * 1.1 + ph * 2) * 0.25,
+                         cz + std::cos(time * 0.6 + ph) * 0.8 + std::cos(time * 2.3 + ph) * 0.2);
+            float a = 0.75f + 0.25f * float(std::sin(time * 3.1 + ph * 5));
+            b.additive = true;
+            b.tex = tex(e.mask);
+            b.mode = b.tex ? 6 : 0;
+            auto [ax, ay] = bill(c, 0.06 * sc, 0);
+            quad(c, ax, ay, 1.f, 0.97f, 0.7f, a);
+            b.count = uint32_t(rend.fx.size()) - b.first;
+            if (b.count) rend.fxBatches.push_back(b);
+            halo(c, 0.35 * sc, 0.75f, 0.95f, 0.45f, 0.3f * a);
+        }
+        return;
+    }
     switch (e.kind) {
         case FxKind::Leaf: {
             // (feuilles qui tombent en tournoyant, poussées par le vent ; texture de feuille du jeu)

@@ -183,7 +183,9 @@ public:
     FxSlot* effect(const std::string& actor);
     bool showEffects = true;
     // (particules d'un effet placé : ajoutées à rend.fx pour cette image)
-    void emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint32_t seed, float time, const V3& camRight, const V3& camUp);
+    // (attached : effet porté par un objet — insecte, bougie — dessiné à sa taille ; bbox : boîte de son modèle)
+    void emitFx(const FxSlot& f, const V3& p, const M3& R, const V3& s, uint32_t seed, float time, const V3& camRight, const V3& camUp,
+                bool attached = false, const float* bbox = nullptr);
     std::vector<TerrainTile> tiles;
     std::string terrainStatus;
     std::string terrainMatStatus, terrainCmbStatus;   // (textures du sol : Tex/MaterialAlb, relief : Tex/MaterialCmb)

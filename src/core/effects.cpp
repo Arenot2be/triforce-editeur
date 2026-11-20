@@ -112,6 +112,23 @@ EffectInfo effectParse(const Bytes& vsetb, const std::string& name) {
     return e;
 }
 
+// Effet permanent ? Toujours pour un emplacement EftLoc ; pour un autre acteur, seulement si un de ses ensembles
+// tourne en continu (« …_Move_00 » des insectes, « …_Candle_00 », « …PointLight… », « …_Loop… ») : les autres
+// (éclaboussures, poussière de course…) ne viennent que pendant une action. La famille est alors tirée de ces seuls ensembles.
+static void markAmbient(EffectInfo& e) {
+    if (startsWith(e.actor, "EftLoc")) { e.ambient = true; return; }
+    std::string keep;
+    for (auto& s : e.esets) {
+        std::string l = lower(s);
+        bool move = l.size() > 8 && l.compare(l.size() - 8, 5, "_move") == 0;   // (« _Move_00 »)
+        if (move || has(l, {"candle", "pointlight", "_loop", "torch", "flame_00"})) keep += " " + l;
+    }
+    if (keep.empty()) return;
+    e.ambient = true;
+    if (has(keep, {"candle", "torch", "flame"})) e.kind = FxKind::Fire;
+    else if (has(keep, {"insect", "pointlight", "firefly", "fairy", "glow"})) e.kind = FxKind::Glow;
+}
+
 // (UserName de l'ELinkParam de l'acteur, en suivant ses parents ; à défaut le nom de l'acteur)
 static void findUserName(const Value& v, std::string& out) {
     if (!out.empty()) return;
@@ -123,7 +140,7 @@ static void findUserName(const Value& v, std::string& out) {
     }
 }
 
-EffectInfo effectLoad(Game& g, const std::string& actor) {
+EffectInfo effectLoad(Game& g, const std::string& actor, const std::string& model) {
     std::string user;
     std::string rel = "Pack/Actor/" + actor + ".pack.zs";
     if (g.exists(rel)) {
@@ -138,6 +155,9 @@ EffectInfo effectLoad(Game& g, const std::string& actor) {
     std::vector<std::string> tries;
     if (!user.empty()) tries.push_back(user);
     if (user != actor) tries.push_back(actor);
+    // (effets des objets du décor rangés au nom de leur modèle : chandeliers, bougies…)
+    if (!model.empty()) tries.push_back("CmnTex_Map_" + model);
+    tries.push_back("CmnTex_Map_" + actor);
     std::string why;
     for (auto& n : tries) {
         std::string f = "Effect/" + n + ".Nin_Ounce_NVN2.vsetb.byml.zs";
@@ -146,6 +166,7 @@ EffectInfo effectLoad(Game& g, const std::string& actor) {
             EffectInfo e = effectParse(g.read(f), n);
             e.actor = actor;
             e.file = f;
+            markAmbient(e);
             return e;
         } catch (const std::exception& x) {
             why = f + " illisible : " + x.what();

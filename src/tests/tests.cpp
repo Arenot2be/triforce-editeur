@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
         } else if (cmd == "fx") {   // romfs acteur -> effet lu
             Game g(u8path(argv[2]));
             EffectInfo e = effectLoad(g, argv[3]);
-            std::printf("%s %s kind=%s color=%s mask=%s\n", e.name.c_str(), e.file.c_str(), fxKindName(e.kind), e.color.c_str(), e.mask.c_str());
+            std::printf("%s %s kind=%s color=%s mask=%s permanent=%d\n", e.name.c_str(), e.file.c_str(), fxKindName(e.kind), e.color.c_str(), e.mask.c_str(), e.ambient ? 1 : 0);
             if (!e.why.empty()) std::printf("pourquoi : %s\n", e.why.c_str());
             for (auto& s : e.esets) std::printf("eset %s\n", s.c_str());
             for (auto& s : e.textures) std::printf("tex %s\n", s.c_str());

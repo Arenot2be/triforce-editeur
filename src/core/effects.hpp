@@ -20,12 +20,14 @@ struct EffectInfo {
     std::set<std::string> modules;              // (modules utilisés par les émetteurs)
     FxKind kind = FxKind::Generic;
     std::string color, mask;                    // (texture de couleur _Fca/_Fc… et texture d'intensité _Fi… choisies)
+    bool ambient = false;                       // (effet permanent : emplacement EftLoc, ou ensemble « …_Move_00 », bougie, lueur…)
     std::string why;                            // (fichier d'effet absent ou illisible : famille devinée du nom seul)
 };
 
 const char* fxKindName(FxKind k);
 // (sans fichier d'effet lisible : la famille est devinée du nom de l'acteur, et `why` dit pourquoi)
-EffectInfo effectLoad(Game& g, const std::string& actor);
+// (model : nom du modèle de l'acteur, pour les effets rangés sous « CmnTex_Map_<modèle> » comme les bougies)
+EffectInfo effectLoad(Game& g, const std::string& actor, const std::string& model = "");
 // (lecture du seul fichier d'effet, pour les tests)
 EffectInfo effectParse(const Bytes& vsetb, const std::string& name);
 
