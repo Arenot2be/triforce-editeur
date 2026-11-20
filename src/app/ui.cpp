@@ -197,7 +197,7 @@ std::string decorAudit(Editor& ed, int& pending) {
             continue;
         }
         if (hasFx && fx->ambient) { lines.push_back({5, head + " — pas de modèle, effet permanent affiché (" + fxs + ")"}); nFx += c; continue; }
-        if (invisible(n)) { lines.push_back({4, head + " — invisible en jeu (zone, repère ou mur), boîte de repérage"}); nInvis += c; continue; }
+        if (invisible(n) || why.find("invisible en jeu") != std::string::npos) { lines.push_back({4, head + " — invisible en jeu (zone, repère ou mur), boîte de repérage"}); nInvis += c; continue; }
         std::string t = head + " — NON GÉRÉ, boîte de couleur : " + (why.empty() ? "pas de modèle" : why);
         if (hasFx) { t += " ; a seulement un effet d'action (" + fx->file + ")"; nAction += c; }
         lines.push_back({1, t});

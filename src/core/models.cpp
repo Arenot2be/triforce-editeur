@@ -130,6 +130,11 @@ std::string ModelIndex::file(const std::string& actor) {
         // (sans ModelInfo : un modèle de Model/ qui porte le nom de l'acteur, s'il y en a un)
         std::string rel = path(actor, "");
         if (!rel.empty()) return rel;
+        // (ModelInfo « None » : acteur sans rien à afficher, seulement des formes de collision)
+        if (auto p = pack(actor))
+            for (auto& [n, d] : p->files)
+                if (n.find("/ModelInfo/None.") != std::string::npos)
+                    throw Error("ModelInfo « None » : pas de modèle, l'acteur n'a que des formes de collision (invisible en jeu)");
         // (pour comprendre : ce que contient le paquet de l'acteur)
         std::string inside;
         if (auto p = pack(actor)) {
