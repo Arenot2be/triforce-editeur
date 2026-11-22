@@ -6,9 +6,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
+# ---------------------------------------------------------------- optimisations CPU AMD Ryzen 7 9800X3D (Zen 5)
+# Zen 5 : support AVX-512, 16 registres XMM/YMM/ZMM, prefetchWT, L1/L2 cache optimisés
+# /arch:AVX512 = code natif Zen 5 (AVX-512 FMA, BW, DQ, VNNI)
+# /O2 = optimisation vitesse, /GLT = LTO, /Qpar = auto-parallelisation boucles
+# /fp:fast = flottant rapide (réarrangement autorisé, important pour AVX-512)
+# /Zc:wchar_t- = compatibilité, /permissive- = conformité C++20
 if(MSVC)
-  add_compile_options(/utf-8 /MP)
+  add_compile_options(/utf-8 /MP /O2 /GLT /fp:fast /Qpar /arch:AVX512 /Zc:wchar_t- /permissive-)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  # LTO FULL (plus agressif que THIN) + profilage pour Zen 5
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+  set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG /OPT:REF /OPT:ICF /PROFGEN")
+  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /LTCG /OPT:REF /OPT:ICF")
 endif()
 
 option(TE_GLFW_NULL_ONLY "GLFW sans fenêtre (tests sous Linux avec une surface Vulkan headless)" OFF)
@@ -67,6 +77,12 @@ if(WIN32)
   target_compile_definitions(te_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
   target_link_libraries(te_core PUBLIC shell32 ole32)
 endif()
+# Optimisations CPU : Zen 5 (Ryzen 7 9800X3D)
+# AVX-512 : 512-bit SIMD, FMA4, BW, DQ instructions
+# Auto-vectorisation agressive pour les boucles de décodage ASTC, bfres, terrain
+if(MSVC)
+  target_compile_options(te_core PRIVATE /arch:AVX512 /fp:fast /Qpar /favor:{AMD,ARM64,PE8})
+endif()
 
 add_executable(te_tests src/tests/tests.cpp)
 target_link_libraries(te_tests PRIVATE te_core)
@@ -83,6 +99,15 @@ endif()
 target_include_directories(TriforceEditeur PRIVATE src ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends ${imgui_SOURCE_DIR}/misc/cpp)
 target_compile_definitions(TriforceEditeur PRIVATE IMGUI_IMPL_VULKAN_USE_VOLK GLFW_INCLUDE_NONE)
 target_link_libraries(TriforceEditeur PRIVATE te_core volk glfw Vulkan::Headers)
+# Optimisations CPU : Zen 5 (Ryzen 7 9800X3D) + GPU : RDNA 4 (RX 9070 XT)
+# AVX-512 pour le traitement CPU (décompression, terrain, modèles)
+# LTO intégré via add_compile_options ci-dessus
+if(MSVC)
+  # /arch:AVX512 = code natif Zen 5 (AVX-512 FMA, BW, DQ, VNNI)
+  # /fp:fast = flottant rapide (réarrangement autorisé, important pour AVX-512)
+  # /Qpar = auto-parallélisation des boucles
+  target_compile_options(TriforceEditeur PRIVATE /arch:AVX512 /fp:fast /Qpar)
+endif()
 if(NOT WIN32)
   target_link_libraries(TriforceEditeur PRIVATE pthread dl)
 endif()

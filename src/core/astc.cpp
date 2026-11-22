@@ -56,6 +56,7 @@ void decodeISE(const uint8_t* blk, int start, int count, int q, int* out) {
     int pos = start;
     if (Q[q][2]) {
         static const int tb[5] = {2, 2, 1, 2, 1};
+        // Zen 5 : auto-vectorisation via /Qpar + AVX-512
         for (int blk5 = 0; blk5 < count; blk5 += 5) {
             int T = 0, shift = 0;
             for (int k = 0; k < 5; k++) {
@@ -67,6 +68,7 @@ void decodeISE(const uint8_t* blk, int start, int count, int q, int* out) {
         }
     } else if (Q[q][3]) {
         static const int qb[3] = {3, 2, 2};
+        // Zen 5 : auto-vectorisation via /Qpar + AVX-512
         for (int blk3 = 0; blk3 < count; blk3 += 3) {
             int Qv = 0, shift = 0;
             for (int k = 0; k < 3; k++) {
@@ -77,6 +79,7 @@ void decodeISE(const uint8_t* blk, int start, int count, int q, int* out) {
             for (int k = 0; k < 3 && blk3 + k < count; k++) out[blk3 + k] = (qq[size_t(k)] << nb) | m[blk3 + k];
         }
     } else {
+        // Boucle simple : le compilateur MSVC avec /Qpar /arch:AVX512 auto-vectorise
         for (int k = 0; k < count; k++) { out[k] = read(pos, nb); pos += nb; }
     }
 }
@@ -477,6 +480,7 @@ void decodeBlock(Ctx& c, const uint8_t* blk, int bw, int bh, int ox, int oy) {
     int wraw[72] = {};
     decodeISE(rev, 0, wcount, wq, wraw);
     for (int i = 0; i < wcount; i++) wraw[i] = unqWeight(wraw[i], wq);
+    // Zen 5 : boucle de blending SIMD — /Qpar auto-vectorise, AVX-512 pour les flottants
     int Ds = (1024 + (bw >> 1)) / (bw - 1), Dt = (1024 + (bh >> 1)) / (bh - 1);
     bool small = bw * bh < 31;
     auto gw = [&](int pl, int i) { return i < gx * gy ? wraw[i * planes + pl] : 0; };

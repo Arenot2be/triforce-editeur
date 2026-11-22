@@ -22,9 +22,10 @@ void Vk::init(GLFWwindow* win, bool hl) {
     const char** ext = glfwGetRequiredInstanceExtensions(&n);
     if (!ext) throw Error("GLFW : Vulkan indisponible sur cet ordinateur");
     std::vector<const char*> exts(ext, ext + n);
+    // Vulkan 1.3 pour RDNA 4 : meilleur support float16/int8, robustness2
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "Triforce editeur";
-    app.apiVersion = VK_API_VERSION_1_1;
+    app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;
     ici.enabledExtensionCount = uint32_t(exts.size());
@@ -33,10 +34,31 @@ void Vk::init(GLFWwindow* win, bool hl) {
     volkLoadInstance(instance);
     check(glfwCreateWindowSurface(instance, win, nullptr, &surface), "glfwCreateWindowSurface");
 
+    // Détection GPU optimisée pour AMD RDNA 4 (RX 9070 XT)
+    // Priorité : carte discrète AMD > autre discrète > intégrée
     uint32_t pc = 0;
     vkEnumeratePhysicalDevices(instance, &pc, nullptr);
     std::vector<VkPhysicalDevice> pds(pc);
     vkEnumeratePhysicalDevices(instance, &pc, pds.data());
+
+    auto scoreDevice = [](const VkPhysicalDeviceProperties& p) -> int {
+        // RDNA 4 : deviceID 0x743c ou nom contenant "Radeon RX 9070"
+        bool isRdna4 = (p.deviceID == 0x743c || p.deviceID == 0x106f ||
+                        strstr(p.deviceName, "RX 9070") != nullptr ||
+                        strstr(p.deviceName, "Radeon RX 9000") != nullptr);
+        // RDNA 3/3.5 : deviceIDs 0x744c, 0x746c, 0x742c, etc.
+        bool isRdna3 = (p.deviceID == 0x744c || p.deviceID == 0x746c ||
+                        p.deviceID == 0x742c || p.deviceID == 0x740c);
+        // AMD générique
+        bool isAmd = (p.vendorID == 0x1002);
+
+        int base = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 :
+                   p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
+        // Bonus pour AMD sur plateforme AMD (Zen 5 + RDNA 4 = drivers optimisés)
+        int bonus = isRdna4 ? 10 : isRdna3 ? 7 : isAmd ? 3 : 0;
+        return base + bonus;
+    };
+
     int best = -1;
     for (auto pd : pds) {
         VkPhysicalDeviceProperties p;
@@ -49,8 +71,8 @@ void Vk::init(GLFWwindow* win, bool hl) {
             VkBool32 present = VK_FALSE;
             vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, surface, &present);
             if (!(qs[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) || !present) continue;
-            int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
-            if (score > best) { best = score; phys = pd; family = i; }
+            int s = scoreDevice(p);
+            if (s > best) { best = s; phys = pd; family = i; }
             break;
         }
     }
@@ -58,6 +80,15 @@ void Vk::init(GLFWwindow* win, bool hl) {
     vkGetPhysicalDeviceProperties(phys, &props);
     vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
     gpuName = props.deviceName;
+    // Logging détection GPU pour RDNA 4 (RX 9070 XT)
+    fprintf(stderr, "GPU détecté : %s (deviceID: 0x%04x, vendor: 0x%04x, type: %d)\n",
+            props.deviceName, props.deviceID, props.vendorID, int(props.deviceType));
+    auto isRdna4 = [](const VkPhysicalDeviceProperties& p) -> bool {
+        return (p.deviceID == 0x743c || p.deviceID == 0x106f ||
+                strstr(p.deviceName, "RX 9070") != nullptr ||
+                strstr(p.deviceName, "Radeon RX 9000") != nullptr);
+    };
+    fprintf(stderr, "RDNA 4 identifié : %s\n", isRdna4(props) ? "OUI" : "NON");
     VkPhysicalDeviceFeatures have{}, want{};
     vkGetPhysicalDeviceFeatures(phys, &have);
     bc = have.textureCompressionBC;
@@ -69,13 +100,40 @@ void Vk::init(GLFWwindow* win, bool hl) {
     q.queueFamilyIndex = family;
     q.queueCount = 1;
     q.pQueuePriorities = &prio;
-    const char* dext[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    // Extensions et features optimisées pour RDNA 4 (RX 9070 XT)
+    // float16/int8 : natif sur RDNA 4, crucial pour les shaders
+    // robustness2 : accès mémoire sûr aux tampons
+    std::vector<const char*> deviceExts;
+    deviceExts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    deviceExts.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);  // float16/int8 natif RDNA 4
+    deviceExts.push_back(VK_KHR_MAINTENANCE3_EXTENSION_NAME);         // descriptor indexing
+    deviceExts.push_back(VK_KHR_MAINTENANCE_4_EXTENSION_NAME);        // descriptor heap sizes (RDNA 4)
+
+    VkPhysicalDeviceShaderFloat16Int8Features sf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
+    sf.shaderFloat16 = VK_TRUE;
+    sf.shaderInt8 = VK_TRUE;
+
+    VkPhysicalDeviceRobustness2FeaturesKHR rob{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_KHR};
+    rob.robustBufferAccess2 = VK_TRUE;
+    rob.robustImageAccess2 = VK_TRUE;
+    rob.nullDescriptor = VK_FALSE;
+
+    VkPhysicalDeviceDescriptorIndexingFeatures di{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
+    di.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    di.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+    di.runtimeDescriptorArray = VK_FALSE;
+
+    // Chain feature structures
+    sf.pNext = &rob;
+    rob.pNext = &di;
+
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &q;
-    dci.enabledExtensionCount = 1;
-    dci.ppEnabledExtensionNames = dext;
-    dci.pEnabledFeatures = &want;
+    dci.enabledExtensionCount = uint32_t(deviceExts.size());
+    dci.ppEnabledExtensionNames = deviceExts.data();
+    dci.pNext = &sf;  // float16/int8 natif RDNA 4
+    dci.pEnabledFeatures = nullptr;  // features via structure ext
     check(vkCreateDevice(phys, &dci, nullptr, &dev), "vkCreateDevice");
     volkLoadDevice(dev);
     vkGetDeviceQueue(dev, family, 0, &queue);
@@ -161,10 +219,11 @@ void Vk::init(GLFWwindow* win, bool hl) {
         check(vkCreateFence(dev, &fi, nullptr, &fence[i]), "vkCreateFence");
     }
 
-    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8192};
+    // Descriptor pool augmenté pour les effets complexes (RX 9070 XT : 16 Go VRAM)
+    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16384};
     VkDescriptorPoolCreateInfo dp{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     dp.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    dp.maxSets = 8192;
+    dp.maxSets = 16384;
     dp.poolSizeCount = 1;
     dp.pPoolSizes = &ps;
     check(vkCreateDescriptorPool(dev, &dp, nullptr, &descPool), "vkCreateDescriptorPool");

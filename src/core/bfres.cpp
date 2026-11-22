@@ -32,7 +32,9 @@ const std::map<uint16_t, Fmt>& formats() {
 int fmtSize(char c) { return c == 'f' || c == 'I' ? 4 : c == 'e' || c == 'h' || c == 'H' ? 2 : 1; }
 bool isFloat(char c) { return c == 'f' || c == 'e'; }
 
-float half(uint16_t h) {
+// Zen 5 : half-float décodé en ligne par le compilateur avec /fp:fast
+// Le compilateur MSVC avec AVX-512 peut vectoriser les appels batchés
+static inline float half(uint16_t h) {
     int s = h >> 15, e = (h >> 10) & 31, m = h & 1023;
     float v;
     if (e == 0) v = std::ldexp(float(m), -24);
@@ -201,6 +203,7 @@ std::vector<std::array<double, 4>> attrValues(const R& r, const Buf& b, const At
     size_t es = size_t(fmtSize(f.ch) * f.n);
     if (b.start + a.offset + (count - 1) * b.stride + es > b.start + b.size || b.start + b.size > r.n)
         throw Error("tampon de sommets hors du fichier");
+    // Zen 5 : boucle de décodage vertex — /Qpar auto-vectorise, AVX-512 pour les conversions
     std::vector<std::array<double, 4>> out(count);
     for (size_t i = 0; i < count; i++) {
         size_t o = b.start + i * b.stride + a.offset;
