@@ -989,30 +989,41 @@ void Editor::emitGround(const V3& eye, const V3& camR, const V3& camU) {
                 const GroundKind* K = kind < L.kinds.size() ? &L.kinds[kind] : nullptr;
                 std::string key;
                 if (showTextures && K && !K->texLayers.empty() && !L.texArray.empty())
-                    key = L.texArray + "#" + std::to_string(K->texLayers[g.a3 % K->texLayers.size()]);
+                    key = L.texArray + "#" + std::to_string(K->texLayers[size_t(hash01(k, 7) * K->texLayers.size()) % K->texLayers.size()]);
                 auto& out = byTex[key];
                 bool tx = !key.empty();
                 float kc[3] = {K ? K->color[0] : 1, K ? K->color[1] : 1, K ? K->color[2] : 1};
                 // (sans texture : couleurs moyennes du jeu ; avec : sa texture, sa teinte, un peu assombrie par l'ombre du sous-bois)
                 auto colour = [&](float r, float gg, float bb, float v, float c[3]) {
-                    if (tx) { c[0] = std::min(1.f, kc[0] * 0.8f * v); c[1] = std::min(1.f, kc[1] * 0.8f * v); c[2] = std::min(1.f, kc[2] * 0.8f * v); }
+                    if (tx) { c[0] = std::min(1.f, kc[0]); c[1] = std::min(1.f, kc[1]); c[2] = std::min(1.f, kc[2]); }
                     else { c[0] = r * v; c[1] = gg * v; c[2] = bb * v; }
                 };
                 float col[3];
                 if (moss) {
-                    // (brin de mousse : la texture du jeu montre une petite tige dressée, racines en bas ; donc une carte
-                    // debout sur la surface, inclinée au hasard, tournée vers la caméra autour de son axe ; hauteur selon l'octet 4)
-                    double h = 0.05 + g.a4 / 255.0 * 0.9 + r2 * 0.03;
-                    V3 bu = norm(up + V3((r1 - 0.5) * 0.5, 0, (hash01(k, 3) - 0.5) * 0.5));
-                    V3 side = cross(bu, view);
-                    if (len(side) < 1e-3) side = camR;
-                    side = norm(side) * (h * (tx ? 0.45 : 0.3));
-                    colour(0.23f, 0.33f, 0.1f, 0.8f + 0.35f * r2, col);
-                    fxQuad(out, p + bu * (h * 0.5), side, bu * (h * 0.5), col[0], col[1], col[2], fade);
+                    // (comme le nuanceur de maillage « moss » du jeu, Shader/Foliage.*.bfsha : deux brins par point, dressés
+                    // dans un cône autour de la normale (ouverture : octet 6), pied sur une calotte de rayon tiré de l'octet 4,
+                    // brin de 0,115 × 0,065 m à l'octet 8 = 255, tourné vers la caméra autour de son axe)
+                    double s6 = 0.043 + g.a6 * 0.0032784, rr = (g.a4 / 510.0) / std::sqrt(s6);
+                    double r1m = rr * 0.748, r2m = r1m * (0.88 - g.a6 * 0.0012863);
+                    double sz = g.a8 ? g.a8 / 255.0 : 1.0, H = 0.115 * sz, W = 0.0325 * sz;
+                    V3 t1 = std::fabs(up.x) < 0.9 ? norm(cross(up, V3(1, 0, 0))) : norm(cross(up, V3(0, 0, 1)));
+                    V3 t2 = cross(up, t1);
+                    double ca = 1 - s6 * 0.25, sa = std::sqrt(std::max(0.0, 1 - ca * ca));
+                    colour(0.23f, 0.33f, 0.1f, 0.9f + 0.2f * r2, col);
+                    for (int c = 0; c < 2; c++) {
+                        double psi = c * 3.883221 + r1 * 6.2831853;
+                        V3 D = norm(t1 * (sa * std::cos(psi)) + t2 * (sa * std::sin(psi)) + up * ca);
+                        V3 base = p - up * r1m + D * r2m;
+                        V3 side = cross(D, view);
+                        if (len(side) < 1e-3) side = camR;
+                        side = norm(side) * W;
+                        if (hash01(k, 20 + c) < 0.5) side = side * -1.0;
+                        fxQuad(out, base + D * (H * 0.5), side, D * (H * 0.5), col[0], col[1], col[2], fade);
+                    }
                 } else if (stone) {
                     V3 t1 = std::fabs(up.y) < 0.9 ? norm(cross(up, V3(0, 1, 0))) : norm(cross(up, V3(1, 0, 0)));
                     V3 t2 = cross(up, t1);
-                    double ang = (g.a3 / 256.0 + r1 * 0.1) * 6.283, ca = std::cos(ang), sa = std::sin(ang);
+                    double ang = r1 * 6.283, ca = std::cos(ang), sa = std::sin(ang);
                     V3 a1 = t1 * ca + t2 * sa, a2 = t2 * ca - t1 * sa;
                     double w = (0.04 + g.a4 / 255.0 * 0.14) * (K ? K->width / 0.5 : 1), hh = w * (K ? std::max(0.3f, K->height / K->width) : 0.5);
                     colour(0.45f, 0.43f, 0.39f, 0.75f + 0.4f * r2, col);

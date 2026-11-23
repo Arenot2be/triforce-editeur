@@ -26,7 +26,10 @@ struct FoliageSet {
 // par point : position dans la case (3 octets, 1/64 m), deux octets de réglage (taille…), sorte, orientation de
 // la surface (octet 6 : direction autour de la verticale ; octet 7 : 255 = surface horizontale), autres réglages.
 // Vérifié sur la forêt Kokiri : les plantes posées tombent à quelques centimètres de la mousse et du sous-bois.
-struct GroundPt { float p[3]; float n[3]; uint8_t a3, a4, kind, a11; };
+// (d'après le nuanceur du jeu, Shader/Foliage.*.bfsha : octet 3 = normale du sol, un des 256 points d'une spirale de
+// Fibonacci sur la sphère ; octet 4 = rayon de la touffe ; octet 5 = feuille ou sorte ; octet 6 = ouverture du cône des
+// brins ; octet 8 = taille des brins de mousse (0 = 255))
+struct GroundPt { float p[3]; float n[3]; uint8_t a3, a4, kind, a6, a8, a11; };
 struct GroundCell { float c[3]; uint32_t begin, end; };
 // Sorte de couverture, d'après Pack/Foliage.pack (ResMossList, ResStoneList, ResTurfList,
 // ResShootLeafUndergrowthList) : couches de la texture en tableau (Foliage_<Moss|Stone|Turf|ShootLeaf>_Alb, rangées

@@ -92,10 +92,13 @@ GroundLayer groundParse(const Bytes& d, const std::string& name) {
             g.p[0] = (c[0] - 128) * 4.f + r[0] / 64.f;
             g.p[1] = (c[1] - 127) * 4.f + r[1] / 64.f;
             g.p[2] = (c[2] - 128) * 4.f + r[2] / 64.f;
-            float ny = r[7] / 255.f, h = std::sqrt(std::max(0.f, 1 - ny * ny)), az = r[6] / 256.f * 6.2831853f;
+            // (normale : y = 1 - (2i + 1) / 256, azimut i × 2π × 0,618… (angle d'or), comme le nuanceur Foliage du jeu)
+            float ny = 1.f - (2.f * r[3] + 1.f) / 256.f, h = std::sqrt(std::max(0.f, 1 - ny * ny)), az = r[3] * 3.883221f;
             g.n[0] = std::cos(az) * h;
             g.n[1] = ny;
             g.n[2] = std::sin(az) * h;
+            g.a6 = r[6];
+            g.a8 = r[8];
             g.a3 = r[3];
             g.a4 = r[4];
             g.kind = r[5];
