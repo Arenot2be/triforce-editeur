@@ -620,6 +620,7 @@ void Editor::render(VkCommandBuffer c) {
     vkCmdSetViewport(c, 0, 1, &v);
     vkCmdSetScissor(c, 0, 1, &sc);
     PC base{};
+    base.m[2][3] = gameTone ? toneExposure : 0.f;   // (courbe de tons du jeu : hdr_compose d'AglShader)
     std::memcpy(base.vp, vp.m, 64);
     base.scale[0] = base.scale[1] = base.scale[2] = 1;
     if (showTerrain) rend.drawTerrain(c, base);

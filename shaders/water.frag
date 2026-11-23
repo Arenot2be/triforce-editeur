@@ -79,5 +79,5 @@ void main() {
     float spec = pow(max(dot(r, L), 0.0), 180.0) * 1.6 + pow(max(dot(r, L), 0.0), 24.0) * 0.12;
     col += vec3(1.0, 0.97, 0.9) * spec;
     if (pc.pos.w > 0.5) col = mix(col, vec3(1.0, 0.82, 0.3), pc.pos.w > 1.5 ? 0.18 : 0.38);
-    outColor = vec4(col, clamp(mix(0.62, 0.95, fres) + spec, 0.0, 1.0));
+    outColor = vec4(gameTone(col), clamp(mix(0.62, 0.95, fres) + spec, 0.0, 1.0));
 }

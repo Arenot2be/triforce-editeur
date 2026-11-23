@@ -896,6 +896,12 @@ void viewport(Editor& ed) {
                           "carte de normales (décodée comme le jeu), rugosité, occlusion, et les falaises à deux couches\n"
                           "(roche et mousse fondues selon la pente et les hauteurs)");
     ImGui::SameLine();
+    ImGui::Checkbox("Tons du jeu", &ed.gameTone);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Courbe de tons du jeu (AglShader « hdr_compose ») : exposition, courbe ACES, gamma 2,2.\n"
+                          "Clic droit : régler l'exposition.");
+    if (ImGui::BeginPopupContextItem("expo")) { ImGui::SliderFloat("Exposition", &ed.toneExposure, 0.3f, 4.f); ImGui::EndPopup(); }
+    ImGui::SameLine();
     ImGui::Checkbox("Sol", &ed.showGround);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Couverture du sol de la scène : mousse, gazon, cailloux, sous-bois, aux points donnés par le jeu,\n"

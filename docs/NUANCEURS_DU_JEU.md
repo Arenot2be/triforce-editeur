@@ -45,6 +45,49 @@ Fichiers étudiés (romfs du joueur, jamais dans ce dépôt) : `Shader/Model`, `
 - Éclairage (passe cubemap) : soleil × ombre × N·L / π, plus une irradiance par harmoniques sphériques d'ordre 1
   (0,282 ; 0,163) à reconstruction non linéaire, données par les sondes de la scène (Bake/Probe).
 
+## Paramètres des matériaux (résolu)
+
+ShaderAssign+0x20 : un tableau de 24 octets par paramètre, dans l'ordre du dictionnaire des paramètres (+0x28) :
+empreinte du nom en +8, décalage u16 en +16 dans les données du matériau (FMAT+0x58, 0x390 octets).
+`ns_tex_mtxK` = mode, échelle u, v, rotation, décalage u, v. (FMAT+0x40/+0x48/+0x50 : valeurs, nombres et
+décalages des « render info ».) Exemple, falaise de Kokiri : scalar0 −0,3 (décalage de hauteur), scalar1 0,6
+(largeur du fondu), scalar5/6 0,85/1 (masque d'occlusion), color1 (0,745 ; 1 ; 0,679) teinte de la mousse,
+color2 (0,65 ; 0,5 ; 0,45) teinte des creux.
+
+## Recettes de mélange (lues dans les programmes, appliquées)
+
+Notations : hA, hB = hauteur (B) du RAH de la roche ou du bois et de la mousse ; v = couleur des sommets (rouge) ;
+w = clamp(scalar1, 0,01, 1) ; k = clamp((h − t0) / w) ; poids de la mousse f = v < 0,5 ? 2v(1 − k) : 1 − 2k(1 − v).
+
+- **3552031828** (falaises) : t0 = clamp(N·haut + scalar7) − 0,5 + hB × 4,78 − 2,39 + scalar0 ; h = hA ;
+  couleur A = roche × color0, mêlée à mousse × color2 par le masque clamp((occlusion − scalar6)/(scalar5 − scalar6)) ;
+  résultat = mix(A, mousse × color1, f).
+- **4069519554** (bois des maisons) : t0 = clamp(N·haut) − 0,5 + (hB − 0,5) × scalar7 + scalar0 ; h = 0,5 ;
+  A = clamp(bois × color0 × (1 + scalar6 × (détail − 1))) ; résultat = mix(A, mousse × color1, f).
+- **4260383445** (expression : roche et bois des intérieurs) : t0 = (hB − 0,5) × scalar2 + (v − 0,5) × scalar3 + scalar0 ;
+  h = hA ; résultat = mix(mousse × color0, bois × color1, k).
+
+## Sol (TerrainGround, appliqué)
+
+Matières des 4 points voisins pondérées bilinéairement ; les deux plus présentes gardées ; hauteur de chacune =
+poids + 1,8 × alpha de sa couleur (si le poids ≥ 0,065) ; t = 0,5 + 5/3 × (min(h0 + 0,3, hmax) − h0 − min(h1 + 0,3,
+hmax) + h1) ; couleur et relief mêlés par t.
+
+## Éclairage, ciel, brouillard (AglShader.sharcb)
+
+- Conteneur « BAHS » : 522 sections de contrôle ; le code de chaque programme est à 0x1BC000 + (u32 lu 104 octets
+  avant sa section de contrôle). Liste des programmes : hdr_compose, volume_fog, volume_fog_post_filter,
+  fog_pre_pass, sky_analyze, light_probe_interpolator, probe_analyze, hemi_to_env, screen_space_shadow, ssao…
+- **hdr_compose** (appliqué : case « Tons du jeu ») : + flou lumineux, matrice de couleur 3×4, exposition, courbe
+  ACES ajustée x(2,51x + 0,03) / (x(2,43x + 0,59) + 0,14), gamma 1/2,2 ; exposition locale par grille bilatérale
+  (luminance 0,2126/0,7152/0,0722).
+- **brouillard volumique** : grille 3D (en-diffusion et atténuation) ; tranche = (ln(d/proche) / ln(loin/proche))^(1/k) ;
+  couleur = scène × 2^(−atténuation) + en-diffusion. Les densités et couleurs viennent de
+  System/GameGraphics/VolumeFogAreaParam et de l'environnement (Env/GameScene…genvb).
+- **éclairage des modèles** (passe cubemap du nuanceur « model ») : soleil × ombre × N·L / π + irradiance des sondes
+  (harmoniques sphériques d'ordre 1 par objet, coefficients 0,282 et 0,163, reconstruction non linéaire), calculée par
+  light_probe_interpolator depuis Bake/Probe.
+
 ## Appliqué dans l'éditeur
 
 - Lecture des réglages de chaque matériau (`core/matshader.*`, `bfres.cpp`) : textures réelles de chaque rôle,
@@ -53,7 +96,12 @@ Fichiers étudiés (romfs du joueur, jamais dans ce dépôt) : `Shader/Model`, `
   reflet discret, découpe alpha des matériaux qui en ont ; falaises à deux couches (roche + mousse) selon la pente et
   les hauteurs. Case « Relief » pour comparer.
 
-## Lu mais pas encore appliqué
+## Pas encore appliqué (fichiers manquants)
+
+- Sondes (Bake/Probe/Scene/<scène>/meta.bkprmb, resident.bkprcb, X*_Y*_Z*_*.bkprb), environnement
+  (Env/GameScene.Nin_Ounce_NVN2.genvb : ciel, soleil, couleurs), brouillard (VolumeFogAreaParam).
+
+## Lu mais pas encore appliqué (anciennes notes)
 
 - Valeurs des paramètres des matériaux (`ns_param_*`, `ns_tex_mtx*`) : leur rangement dans le bfres (FMAT+0x50 :
   décalages, +0x58 : données) n'est pas encore compris ; l'éditeur prend des valeurs par défaut.

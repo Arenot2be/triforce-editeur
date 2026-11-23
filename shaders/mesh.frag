@@ -144,5 +144,5 @@ void main() {
         col = c.rgb * (0.03 + sky * B.r * 0.8 + sun * B.g * mix(0.45, 1.0, ndl));
     }
     if (pc.pos.w > 0.5) col = mix(col, vec3(1.0, 0.82, 0.3), pc.pos.w > 1.5 ? 0.18 : 0.38);
-    outColor = vec4(col, alpha);
+    outColor = vec4(gameTone(col), alpha);
 }
