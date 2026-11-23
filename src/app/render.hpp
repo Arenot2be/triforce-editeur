@@ -21,7 +21,8 @@ static_assert(sizeof(PC) == 128, "constantes de 128 octets");
 struct GpuMesh {
     VkBuf vb, ib;
     struct Sub { uint32_t start, count; std::string tex; int kind = 0; std::string nrm, flow;
-                 std::string tex2, detail, mat; int matIndex = 0; };   // (kind 4 : couche posée par-dessus, opacité des sommets)
+                 std::string tex2, detail, mat; int matIndex = 0;   // (kind 4 : couche posée par-dessus, opacité des sommets)
+                 std::string nmap, rgh, nmap2, rah2; int rghCh = 0; bool layered = false, rah = false, alphaTest = false; };
     std::vector<Sub> subs;
     bool translucent = false;   // (a des parties d'eau, de fondu ou de verre)
     float bbox[6] = {0, 0, 0, 0, 0, 0};
@@ -71,7 +72,8 @@ public:
     // translucent : seulement les parties sans texture d'eau, de fondu ou de verre (à dessiner après le reste) ;
     // sinon tout sauf elles
     // (tex : par partie, couleur, seconde couleur, détail ; VK_NULL_HANDLE = sans)
-    using SubTex = std::array<VkDescriptorSet, 3>;
+    // (… puis carte de normales, rugosité (ou RAH), normales et RAH de la seconde couche)
+    using SubTex = std::array<VkDescriptorSet, 7>;
     // (éclairage précalculé d'un objet : sa carte, et pour chaque partie la place de ses coordonnées dans la carte —
     //  décalage u, v puis échelle u, v ; échelle nulle : partie non éclairée)
     struct Bake { VkDescriptorSet map = VK_NULL_HANDLE; std::vector<std::array<float, 4>> sub; float strength = 1.f; };

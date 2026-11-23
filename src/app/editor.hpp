@@ -187,6 +187,7 @@ public:
     std::vector<GroundLayer> ground;
     std::string groundStatus, lightsStatus;
     std::vector<SceneLight> lights;
+    bool showRelief = true;   // (cartes de normales et rugosité des matériaux, comme le nuanceur du jeu)
     bool showGround = true, showLights = true;
     void emitGround(const V3& eye, const V3& camR, const V3& camU);
     void emitLights(const V3& eye, const V3& camR, const V3& camU, float time);

@@ -5,6 +5,7 @@
 
 #include "core/astc.hpp"
 #include "core/bfres.hpp"
+#include "core/matshader.hpp"
 #include "core/bntx.hpp"
 #include "core/game.hpp"
 #include "core/mapdoc.hpp"
@@ -42,10 +43,12 @@ int main(int argc, char** argv) {
         } else if (cmd == "bfres") {
             Bytes f = readFile(u8path(argv[2]));
             if (isMeshCodec(f)) f = meshCodecUnpack(f);
+            if (const char* e = std::getenv("TE_EBS")) setShaderNames(ebsParse(readFile(u8path(e))));
             Mesh m = bfresRead(f, argc > 3 ? argv[3] : "");
             std::printf("%zu %zu %zu", m.positions.size() / 3, m.indices.size(), m.subs.size());
             for (auto& s : m.subs) std::printf(" [%u %u %s]", s.start, s.count, s.tex.c_str());
             if (std::getenv("TE_KIND")) for (auto& s : m.subs) std::printf("  matériau %s : genre %d, normales %s, courant %s\n", s.material.c_str(), s.kind, s.nrm.c_str(), s.flow.c_str());
+            if (std::getenv("TE_EBS")) for (auto& s : m.subs) std::printf("\n  %s : couleur %s | normales %s | rugosité %s (canal %d%s) | couche 2 %s %s %s%s | %s", s.material.c_str(), s.tex.c_str(), s.nmap.c_str(), s.rgh.c_str(), s.rghCh, s.rah ? ", RAH" : "", s.tex2.c_str(), s.nmap2.c_str(), s.rah2.c_str(), s.alphaTest ? " | alpha" : "", s.shaderInfo.c_str());
             double sum = 0;
             for (float f : m.positions) sum += f;
             for (float f : m.uvs) sum += f;

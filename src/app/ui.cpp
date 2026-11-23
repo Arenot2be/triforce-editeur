@@ -890,6 +890,12 @@ void viewport(Editor& ed) {
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Plantes et branches basses posées par la scène (Foliage/Placement/Scene), à moins de 180 m de la caméra\n%s", ed.foliageStatus.c_str());
     ImGui::SameLine();
+    ImGui::Checkbox("Relief", &ed.showRelief);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Matériaux lus comme le nuanceur « model » du jeu (Shader/ExternalBinaryString pour les noms des réglages) :\n"
+                          "carte de normales (décodée comme le jeu), rugosité, occlusion, et les falaises à deux couches\n"
+                          "(roche et mousse fondues selon la pente et les hauteurs)");
+    ImGui::SameLine();
     ImGui::Checkbox("Sol", &ed.showGround);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Couverture du sol de la scène : mousse, gazon, cailloux, sous-bois, aux points donnés par le jeu,\n"

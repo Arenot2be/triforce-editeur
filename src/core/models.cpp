@@ -1,6 +1,8 @@
 #include "core/models.hpp"
+#include "core/matshader.hpp"
 
 #include <algorithm>
+#include <mutex>
 
 namespace te {
 
@@ -153,7 +155,19 @@ std::string ModelIndex::file(const std::string& actor) {
     return rel;
 }
 
+// (noms des réglages des nuanceurs : Shader/ExternalBinaryString.bfres, lu une fois)
+void ensureShaderNames(Game& g) {
+    static std::once_flag once;
+    std::call_once(once, [&] {
+        try {
+            auto n = ebsParse(g.read("Shader/ExternalBinaryString.bfres.zs"));
+            if (n && !n->empty()) setShaderNames(n);
+        } catch (...) {}
+    });
+}
+
 Mesh ModelIndex::load(const std::string& actor) {
+    ensureShaderNames(game_);
     std::string rel = file(actor);
     auto inf = info(actor);
     try {

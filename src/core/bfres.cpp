@@ -1,5 +1,6 @@
 // Port de triforce_modkit/bfres.py : les structures dont la place varie sont retrouvées par leurs signatures.
 #include "core/bfres.hpp"
+#include "core/matshader.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -366,7 +367,64 @@ const Attr* pickAttr(const std::vector<Attr>& attrs, const std::string& name) {
     return nullptr;
 }
 
-std::vector<std::vector<std::string>> materialTextures(const R& r, size_t mdl, std::vector<std::string>* matNames = nullptr) {
+// Réglages du nuanceur d'un matériau (FMAT +0x10 : ShaderInfo ; +0x38 : noms des samplers, dans l'ordre des textures)
+MatShader readMatShader(const R& r, size_t m, const std::vector<std::string>& texNames) {
+    MatShader ms;
+    size_t si = r.ptr(m + 0x10);
+    if (!si) return ms;
+    size_t sa = r.ptr(si);
+    if (!sa) return ms;
+    ms.archive = r.str(sa);
+    ms.model = r.str(sa + 8);
+    if (!shaderNames()) return ms;
+    auto dictNames = [&](size_t d, bool hashed) {
+        std::vector<std::string> out;
+        if (!d || d + 8 > r.n) return out;
+        uint32_t n = r.u32(d + 4);
+        if (n > 4096) return out;
+        for (uint32_t k = 0; k < n; k++) {
+            size_t e = d + 8 + 16 * size_t(k + 1) + 8;
+            if (e + 8 > r.n) break;
+            out.push_back(hashed ? shaderName(r.u64(e)) : r.str(e));
+        }
+        return out;
+    };
+    std::vector<std::string> optNames = dictNames(r.ptr(sa + 0x40), true);
+    std::vector<std::string> sampKeys = dictNames(r.ptr(sa + 0x38), false);
+    int nsamp = r.u8(si + 0x45), nbool = r.u8(si + 0x46), nval = r.u16(si + 0x48);
+    size_t bitsP = r.ptr(si + 0x28), sv = r.ptr(si + 0x30), idx = r.ptr(si + 0x38), sp = r.ptr(si + 0x18);
+    uint64_t bits = bitsP ? r.u64(bitsP) : 0;
+    if (idx && nval > 0 && nval < 1024)
+        for (int j = 0; j < nval; j++) {
+            uint16_t oi = r.u16(idx + 2 * size_t(j));
+            if (oi >= optNames.size()) continue;
+            if (j < nbool) ms.opts[optNames[oi]] = (bits >> j) & 1 ? "1" : "0";
+            else if (sv) ms.opts[optNames[oi]] = r.str(sv + 8 * size_t(j - nbool));
+        }
+    // (samplers du nuanceur, dans l'ordre du bfsha ; les valeurs, noms des samplers du bfres, suivent cet ordre)
+    static const char* ORDER[] = {"_a0", "_n0", "_r0", "_m0", "_ao0", "_s0", "_array0", "_array1", "_array2", "bake0", "bake1", "_a1", "_n1"};
+    auto rank = [](const std::string& k) { for (int i = 0; i < 13; i++) if (k == ORDER[i]) return i; return 100; };
+    std::stable_sort(sampKeys.begin(), sampKeys.end(), [&](const std::string& a, const std::string& b) { return rank(a) < rank(b); });
+    std::map<std::string, std::string> assign;
+    for (int k = 0; k < nsamp && size_t(k) < sampKeys.size() && sp; k++) assign[sampKeys[size_t(k)]] = r.str(sp + 8 * size_t(k));
+    std::vector<std::string> fmatSamp = dictNames(r.ptr(m + 0x38), false);
+    static const char* SLOT[] = {"_a0", "_n0", "_r0", "_m0", "_ao0", "_s0", "_a1", "_n1"};
+    for (int n = 0; n < 8; n++) {
+        int j = ms.optInt("ns_texture" + std::to_string(n) + "_sampler", -1);
+        if (j < 0 || j > 7) continue;
+        auto it = assign.find(SLOT[j]);
+        if (it == assign.end()) continue;
+        for (size_t t = 0; t < fmatSamp.size() && t < texNames.size(); t++)
+            if (fmatSamp[t] == it->second) { ms.slot[size_t(n)] = texNames[t]; break; }
+        int tc = ms.optInt("ns_texture" + std::to_string(n) + "_texcoord", 0);
+        int mp = ms.optInt("ns_texcoord" + std::to_string(tc) + "_mapping", 0);
+        ms.slotUv[size_t(n)] = mp >= 0 && mp <= 3 ? mp : 0;
+    }
+    return ms;
+}
+
+std::vector<std::vector<std::string>> materialTextures(const R& r, size_t mdl, std::vector<std::string>* matNames = nullptr,
+                                                        std::vector<MatShader>* shaders = nullptr) {
     auto [mo, mats] = findPtr(r, mdl, 0x60, "FMAT");
     std::vector<std::vector<std::string>> out;
     if (!mats) return out;
@@ -401,6 +459,9 @@ std::vector<std::vector<std::string>> materialTextures(const R& r, size_t mdl, s
                     break;
                 }
             }
+        }
+        if (shaders) {
+            try { shaders->push_back(readMatShader(r, m, names)); } catch (...) { shaders->push_back({}); }
         }
         out.push_back(names);
     }
@@ -492,7 +553,20 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     std::vector<uint16_t> table;
     if (skel) bones(r, skel, world, table);
     std::vector<std::string> matNames;
-    auto materials = materialTextures(r, mdl, &matNames);
+    std::vector<MatShader> shaders;
+    auto materials = materialTextures(r, mdl, &matNames, &shaders);
+    auto shaderOf = [&](int mi) -> const MatShader* {
+        return size_t(mi) < shaders.size() && shaders[size_t(mi)].archive == "Model" && !shaders[size_t(mi)].opts.empty() ? &shaders[size_t(mi)] : nullptr;
+    };
+    // (coordonnées de la couleur et de la seconde couche d'un matériau, d'après ses réglages : _u0, _u1…)
+    auto uvSets = [&](int mi) -> std::pair<int, int> {
+        const MatShader* ms = shaderOf(mi);
+        if (!ms) return {0, 0};
+        int a = ms->select("albedo", 0);
+        int ua = a >= 0 && a < 8 && !ms->slot[size_t(a)].empty() ? ms->slotUv[size_t(a)] : ms->slotUv[0];
+        bool layered = ms->opt("ns_overwrite_surface_graph") == "3552031828";
+        return {ua, layered ? ms->slotUv[3] : ua};
+    };
     // (partie sans texture de couleur : eau, fondu, verre… d'après les noms du matériau et de ses textures)
     auto subOf = [&](uint32_t start, uint32_t count, int matIdx, const std::string& tex) {
         Mesh::Sub s{start, count, tex, 0, size_t(matIdx) < matNames.size() ? matNames[size_t(matIdx)] : ""};
@@ -506,6 +580,35 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 else if (l.rfind("cmntex_", 0) != 0 && s.tex2.empty()) s.tex2 = n;
             }
         s.matIndex = matIdx;
+        if (const MatShader* ms = shaderOf(matIdx); ms && !tex.empty()) {
+            auto slotTex = [&](int k) { return k >= 0 && k < 8 ? ms->slot[size_t(k)] : std::string(); };
+            int a = ms->select("albedo", 0);
+            if (!slotTex(a).empty()) s.tex = slotTex(a);
+            auto ends = [&](const std::string& t, std::initializer_list<const char*> ks) {
+                std::string l = lower(t);
+                for (auto k : ks) if (endsWith(l, k)) return true;
+                return false;
+            };
+            if (ms->opt("ns_enable_normal_map") == "1") s.nmap = slotTex(ms->select("normal_map"));
+            if (!ends(s.nmap, {"_nrm"})) s.nmap.clear();
+            // (normales et rugosité calculées par un graphe : la carte de normales du matériau quand il en a une)
+            if (s.nmap.empty() && ms->opt("ns_enable_normal_map") == "1")
+                for (int k = 0; k < 8; k++) if (ends(slotTex(k), {"_nrm"})) { s.nmap = slotTex(k); break; }
+            int rs = ms->select("roughness");
+            if (ends(slotTex(rs), {"_rgh", "_rah", "_nrm"})) { s.rgh = slotTex(rs); s.rghCh = std::clamp(ms->optInt("ns_roughness_channel", 0), 0, 3); }
+            s.alphaTest = ms->opt("ns_enable_alpha") == "1" || ms->opt("gsys_alpha_test_enable") == "1";
+            std::string g = ms->opt("ns_overwrite_surface_graph");
+            if (g == "3552031828" && !slotTex(3).empty()) {
+                // (falaises de Kokiri… : roche (0 couleur, 1 normales, 2 RAH) et mousse (3, 4, 5), fondues par la pente,
+                //  les hauteurs des deux RAH et la couleur des sommets ; lu dans le programme du jeu)
+                s.layered = true;
+                s.tex = slotTex(0); s.nmap = slotTex(1); s.rgh = slotTex(2); s.rghCh = 0; s.rah = true;
+                s.tex2 = slotTex(3); s.nmap2 = slotTex(4); s.rah2 = slotTex(5);
+            }
+            s.shaderInfo = "albedo " + ms->opt("ns_albedo_select", "0") + ", normales " + ms->opt("ns_normal_map_select", "-") +
+                           ", rugosité " + ms->opt("ns_roughness_select", "-") + "/" + ms->opt("ns_roughness_channel", "0") +
+                           (g.empty() ? "" : ", graphe " + g) + (ms->opt("ns_expression_evaluate_graph").empty() ? "" : ", expression " + ms->opt("ns_expression_evaluate_graph"));
+        }
         if (!tex.empty() && endsWith(lower(s.material), "_sl")) s.kind = 4;
         if (tex.empty()) s.kind = surfaceKind(s.material, size_t(matIdx) < materials.size() ? materials[size_t(matIdx)] : std::vector<std::string>{});
         // (eau : sa carte de normales, pour les vagues)
@@ -554,6 +657,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                     m.positions.push_back(float(x)); m.positions.push_back(float(y)); m.positions.push_back(float(z));
                     m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2]);
                     m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2 + 1]);
+                    m.uvs2.push_back(m.uvs[m.uvs.size() - 2]);
+                    m.uvs2.push_back(m.uvs.back());
                     m.colors.insert(m.colors.end(), {1.f, 1.f, 1.f, 1.f});
                     m.bakeUvs.insert(m.bakeUvs.end(), {-1.f, -1.f});
                     m.normals.insert(m.normals.end(), {0.f, 0.f, 0.f});
@@ -589,11 +694,19 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
             if (!pa) throw Error("pas d'attribut de position");
             if (pa->buffer >= bufs.size()) throw Error("tampon de position absent");
             auto pts = attrValues(r, bufs[pa->buffer], *pa, vcount);
-            const Attr* ua = pickAttr(attrs, "_u0");
-            std::vector<std::array<double, 4>> uvs;
-            if (ua && ua != pa && ua->buffer < bufs.size()) {
-                try { uvs = attrValues(r, bufs[ua->buffer], *ua, vcount); } catch (...) { uvs.clear(); }
-            }
+            auto [uvA, uvB] = uvSets(matIdx);
+            auto readUv = [&](int set) {
+                std::vector<std::array<double, 4>> out;
+                const Attr* ua = pickAttr(attrs, "_u" + std::to_string(set));
+                if (!ua && set != 0) ua = pickAttr(attrs, "_u0");
+                if (ua && ua != pa && ua->buffer < bufs.size()) {
+                    try { out = attrValues(r, bufs[ua->buffer], *ua, vcount); } catch (...) { out.clear(); }
+                }
+                return out;
+            };
+            std::vector<std::array<double, 4>> uvs = readUv(uvA);
+            if (uvs.empty() && uvA != 0) uvs = readUv(0);
+            std::vector<std::array<double, 4>> uvs2 = uvB == uvA ? std::vector<std::array<double, 4>>{} : readUv(uvB);
             std::vector<std::array<double, 4>> cols, nrms, bakes;
             bool colLight = false;   // (couleur des sommets en demi-flottants, grise, autour de 1 : éclairage précalculé)
             for (auto& a : attrs) {
@@ -661,6 +774,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 m.positions.push_back(float(x)); m.positions.push_back(float(y)); m.positions.push_back(float(z));
                 m.uvs.push_back(uvs.empty() ? 0.f : float(uvs[k][0]));
                 m.uvs.push_back(uvs.empty() ? 0.f : float(uvs[k][1]));
+                if (uvs2.size() == vcount) { m.uvs2.push_back(float(uvs2[k][0])); m.uvs2.push_back(float(uvs2[k][1])); }
+                else { m.uvs2.push_back(m.uvs[m.uvs.size() - 2]); m.uvs2.push_back(m.uvs.back()); }
                 if (bakes.size() == vcount) m.bakeUvs.insert(m.bakeUvs.end(), {float(bakes[k][0]), float(bakes[k][1])});
                 else m.bakeUvs.insert(m.bakeUvs.end(), {-1.f, -1.f});
                 if (nrms.size() == vcount) {

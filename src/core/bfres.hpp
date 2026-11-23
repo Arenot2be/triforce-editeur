@@ -12,8 +12,16 @@ struct Mesh {
     struct Sub { uint32_t start = 0, count = 0; std::string tex; int kind = 0; std::string material; std::string nrm, flow;
         std::string tex2, detail;
         int matIndex = 0;   // (seconde couleur fondue par le masque des sommets, mousse… ; texture de détail répétée)
+        // (d'après les réglages du nuanceur « model » du jeu, voir core/matshader.hpp : carte de normales, rugosité
+        //  (canal rghCh ; RAH = rugosité, occlusion, hauteur), et pour les matériaux à deux couches du graphe
+        //  3552031828 (falaises : roche + mousse), normales et RAH de la seconde couche)
+        std::string nmap, rgh, nmap2, rah2;
+        int rghCh = 0;
+        bool layered = false, rah = false, alphaTest = false;
+        std::string shaderInfo;   // (résumé des réglages, pour le bilan)
     };
     std::vector<float> positions, uvs;   // (x, y, z) ; (u, v)
+    std::vector<float> uvs2;             // (u, v de la seconde couche des matériaux à deux couches ; sinon = uvs)
     std::vector<float> bakeUvs;          // (u, v par sommet : place dans la carte d'éclairage précalculé ; sans : -1)
     std::vector<float> normals;          // (x, y, z par sommet ; sans : 0, 0, 0)
     std::vector<float> colors;           // (par sommet : rgb = éclairage précalculé des sommets, 1 neutre ; a = opacité des couches)

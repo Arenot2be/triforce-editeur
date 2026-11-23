@@ -10,6 +10,8 @@
 #include "core/game.hpp"
 
 namespace te {
+class Game;
+void ensureShaderNames(Game& g);   // (Shader/ExternalBinaryString : noms des réglages des matériaux)
 
 class ModelIndex {
 public:

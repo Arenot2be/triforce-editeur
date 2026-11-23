@@ -656,6 +656,12 @@ void Editor::render(VkCommandBuffer c) {
             TexSlot* t = texture(n, optional);
             return t && t->st == TexSlot::Ok ? t->tex.set : VK_NULL_HANDLE;
         };
+        // (cartes de données du jeu — normales, rugosité, RAH — souvent rangées comme « masques » : utilisables ici)
+        auto data = [&](const std::string& n) -> VkDescriptorSet {
+            if (n.empty() || !showTextures) return VK_NULL_HANDLE;
+            TexSlot* t = texture(n, true);
+            return t && (t->st == TexSlot::Ok || t->st == TexSlot::Mask) && t->tex.set ? t->tex.set : VK_NULL_HANDLE;
+        };
         for (auto& L : doc.layers) {
             if (!L.visible) continue;
             for (auto& r : L.recs) {
@@ -691,7 +697,8 @@ void Editor::render(VkCommandBuffer c) {
                     for (size_t i = 0; i < g->subs.size(); i++) {
                         if (!showTextures || g->subs[i].tex.empty()) continue;
                         auto& s = g->subs[i];
-                        sets[i] = {ready(s.tex), ready(s.tex2, true), ready(s.detail, true)};
+                        sets[i] = {ready(s.tex), ready(s.tex2, true), ready(s.detail, true), showRelief ? data(s.nmap) : VK_NULL_HANDLE,
+                                   showRelief ? data(s.rgh) : VK_NULL_HANDLE, showRelief ? data(s.nmap2) : VK_NULL_HANDLE, data(s.rah2)};
                     }
                     // (éclairage précalculé de cet objet, d'après son Hash : la carte de sa case et la place de chaque partie)
                     Renderer::Bake bk;
@@ -740,6 +747,12 @@ void Editor::render(VkCommandBuffer c) {
             TexSlot* t = texture(n, optional);
             return t && t->st == TexSlot::Ok ? t->tex.set : VK_NULL_HANDLE;
         };
+        // (cartes de données du jeu — normales, rugosité, RAH — souvent rangées comme « masques » : utilisables ici)
+        auto data = [&](const std::string& n) -> VkDescriptorSet {
+            if (n.empty() || !showTextures) return VK_NULL_HANDLE;
+            TexSlot* t = texture(n, true);
+            return t && (t->st == TexSlot::Ok || t->st == TexSlot::Mask) && t->tex.set ? t->tex.set : VK_NULL_HANDLE;
+        };
         for (auto& f : foliage) {
             ModelSlot* ms = model(f.model);
             if (!ms || ms->st != ModelSlot::Ok) continue;
@@ -748,7 +761,8 @@ void Editor::render(VkCommandBuffer c) {
             for (size_t i = 0; i < g->subs.size(); i++) {
                 if (!showTextures || g->subs[i].tex.empty()) continue;
                 auto& sb = g->subs[i];
-                sets[i] = {ready(sb.tex), ready(sb.tex2, true), ready(sb.detail, true)};
+                sets[i] = {ready(sb.tex), ready(sb.tex2, true), ready(sb.detail, true), showRelief ? data(sb.nmap) : VK_NULL_HANDLE,
+                           showRelief ? data(sb.rgh) : VK_NULL_HANDLE, showRelief ? data(sb.nmap2) : VK_NULL_HANDLE, data(sb.rah2)};
             }
             for (size_t k = 0; k < f.posRot.size(); k++) {
                 const V3& p = f.posRot[k].first;
