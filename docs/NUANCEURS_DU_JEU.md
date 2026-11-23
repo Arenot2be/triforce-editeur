@@ -59,5 +59,9 @@ Fichiers étudiés (romfs du joueur, jamais dans ce dépôt) : `Shader/Model`, `
   décalages, +0x58 : données) n'est pas encore compris ; l'éditeur prend des valeurs par défaut.
 - Graphes 4069519554 (bois des maisons : détail), 4260383445 (expression : roche et mousse des intérieurs) et les
   autres : à traduire un par un.
-- `TerrainGround` (2 modèles : terrain_ground, terrain_zonly), `SceneMaterial` (1), `AglShader.sharcb` (éclairage
+- `TerrainGround` (72 programmes) : la carte des matières est lue par `textureGather` sur les 4 points voisins ;
+  le nuanceur garde les matières présentes, les pondère par les poids bilinéaires (seuil 0,50186 sur les poids),
+  puis lit couleur et relief des textures en tableau ; la normale du relief est décodée × 2,007874 − 1. Pas encore
+  reporté dans `terrain.frag` (qui mélange déjà 4 matières par la hauteur).
+- `SceneMaterial` (1 modèle), `AglShader.sharcb` (éclairage
   différé, ciel, brouillard) et `FoliageShader.sharcb` (préparation du feuillage) : métadonnées lues, code pas encore suivi.
