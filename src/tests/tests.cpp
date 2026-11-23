@@ -99,7 +99,18 @@ int main(int argc, char** argv) {
             for (auto& l : L)
                 if (!l.pts.empty()) {
                     auto& p = l.pts[l.pts.size() / 2];
-                    std::printf("  %s : %zu cases, ex. %.2f %.2f %.2f n %.2f %.2f %.2f\n", l.name.c_str(), l.cells.size(), p.p[0], p.p[1], p.p[2], p.n[0], p.n[1], p.n[2]);
+                    std::printf("  %s : %zu cases, ex. %.2f %.2f %.2f n %.2f %.2f %.2f ; %s, %zu sortes\n", l.name.c_str(), l.cells.size(), p.p[0], p.p[1], p.p[2], p.n[0],
+                                p.n[1], p.n[2], l.texArray.c_str(), l.kinds.size());
+                    std::map<int, size_t> used;
+                    for (auto& q : l.pts) used[lower(l.name).find("turf") != std::string::npos ? q.a11 : q.kind]++;
+                    for (auto& [k, c] : used) {
+                        std::string lay;
+                        if (k < int(l.kinds.size())) for (int x : l.kinds[size_t(k)].texLayers) lay += fmt(" %d", x);
+                        std::printf("     sorte %d × %zu : %s couches%s teinte %.2f %.2f %.2f taille %.2f/%.2f\n", k, c, k < int(l.kinds.size()) ? l.kinds[size_t(k)].res.c_str() : "?",
+                                    lay.c_str(), k < int(l.kinds.size()) ? l.kinds[size_t(k)].color[0] : 0.f, k < int(l.kinds.size()) ? l.kinds[size_t(k)].color[1] : 0.f,
+                                    k < int(l.kinds.size()) ? l.kinds[size_t(k)].color[2] : 0.f, k < int(l.kinds.size()) ? l.kinds[size_t(k)].width : 0.f,
+                                    k < int(l.kinds.size()) ? l.kinds[size_t(k)].height : 0.f);
+                    }
                 }
             auto lights = lightsLoad(g, argv[3], &sl);
             std::printf("%s\n", sl.c_str());

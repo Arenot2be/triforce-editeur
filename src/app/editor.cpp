@@ -961,30 +961,19 @@ static float hash01(uint32_t a, uint32_t b) {
     return float(h & 0xFFFFFF) / float(0x1000000);
 }
 
-// Mousse (taches posées à plat sur la surface), gazon et sous-bois (touffes de brins), cailloux (petits galets),
-// aux points que le jeu donne, près de la caméra seulement : les couches comptent jusqu'à 1,7 million de points.
+// Mousse, gazon, sous-bois et cailloux aux points que le jeu donne, près de la caméra seulement (jusqu'à 1,7 million
+// de points). Chaque point renvoie à une sorte de Pack/Foliage.pack (GroundKind) : couches de la texture en tableau du
+// jeu (Foliage_Moss_Alb…), teinte, tailles. Les formes du jeu sont faites par son nuanceur (les modèles Foliage.*.bfres
+// ne sont que des boîtes) : ici, feuilles de mousse posées à plat, brins et feuilles en touffes, galets.
 void Editor::emitGround(const V3& eye, const V3& camR, const V3& camU) {
     V3 view = norm(cross(camU, camR));
     for (auto& L : ground) {
         std::string ln = lower(L.name);
         bool moss = ln.find("moss") != std::string::npos, turf = ln.find("turf") != std::string::npos, stone = ln.find("stone") != std::string::npos;
-        bool blades = turf || (!moss && !stone);   // (sous-bois et couches inconnues : touffes)
         double R = moss ? 28 : turf ? 45 : stone ? 35 : 35;
         size_t budget = moss ? 45000 : 25000, used = 0;
-        FxBatch b;
-        b.first = uint32_t(rend.fx.size());
-        b.mode = blades ? 7 : 0;
-        // (textures du jeu pour ces couches, quand elles se lisent : les modèles Foliage.Foliage*.bfres ne sont que des
-        // boîtes vides, la forme vient du nuanceur ; seules leurs textures disent l'aspect)
-        const char* tn = moss ? "Foliage_Moss_Alb" : turf ? "Foliage_Turf_Alb" : stone ? "Foliage_Stone_Alb" : "Foliage_ShootLeaf_Alb";
-        if (showTextures)
-            if (TexSlot* t = texture(tn, true); t && t->st == TexSlot::Ok && t->tex.set) { b.tex = t->tex.set; b.mode = 1; }
-        bool textured = b.tex != VK_NULL_HANDLE;
-        auto tint = [&](float r, float g, float bl, float v, float out[3]) {
-            if (textured) { out[0] = out[1] = out[2] = std::min(1.f, v); }
-            else { out[0] = r * v; out[1] = g * v; out[2] = bl * v; }
-        };
-        float col[3];
+        // (sommets rangés par texture : une suite par couche de la texture en tableau)
+        std::map<std::string, std::vector<FxVert>> byTex;
         for (auto& cell : L.cells) {
             V3 cc(cell.c[0], cell.c[1], cell.c[2]);
             if (len(cc - eye) > R + 3.5) continue;
@@ -993,48 +982,71 @@ void Editor::emitGround(const V3& eye, const V3& camR, const V3& camU) {
                 V3 p(g.p[0], g.p[1], g.p[2]), up(g.n[0], g.n[1], g.n[2]);
                 double dist = len(p - eye);
                 if (dist > R) continue;
+                used++;
                 float fade = float(std::clamp((R - dist) / (R * 0.2), 0.0, 1.0));
                 float r1 = hash01(k, 1), r2 = hash01(k, 2);
-                used++;
-                if (moss || stone) {
-                    // (à plat sur la surface : deux axes perpendiculaires à sa normale)
+                size_t kind = turf ? g.a11 : g.kind;
+                const GroundKind* K = kind < L.kinds.size() ? &L.kinds[kind] : nullptr;
+                std::string key;
+                if (showTextures && K && !K->texLayers.empty() && !L.texArray.empty())
+                    key = L.texArray + "#" + std::to_string(K->texLayers[g.a3 % K->texLayers.size()]);
+                auto& out = byTex[key];
+                bool tx = !key.empty();
+                float kc[3] = {K ? K->color[0] : 1, K ? K->color[1] : 1, K ? K->color[2] : 1};
+                // (sans texture : couleurs moyennes du jeu ; avec : sa texture, sa teinte, un peu assombrie par l'ombre du sous-bois)
+                auto colour = [&](float r, float gg, float bb, float v, float c[3]) {
+                    if (tx) { c[0] = std::min(1.f, kc[0] * 0.8f * v); c[1] = std::min(1.f, kc[1] * 0.8f * v); c[2] = std::min(1.f, kc[2] * 0.8f * v); }
+                    else { c[0] = r * v; c[1] = gg * v; c[2] = bb * v; }
+                };
+                float col[3];
+                if (moss) {
+                    // (brin de mousse : la texture du jeu montre une petite tige dressée, racines en bas ; donc une carte
+                    // debout sur la surface, inclinée au hasard, tournée vers la caméra autour de son axe ; hauteur selon l'octet 4)
+                    double h = 0.05 + g.a4 / 255.0 * 0.9 + r2 * 0.03;
+                    V3 bu = norm(up + V3((r1 - 0.5) * 0.5, 0, (hash01(k, 3) - 0.5) * 0.5));
+                    V3 side = cross(bu, view);
+                    if (len(side) < 1e-3) side = camR;
+                    side = norm(side) * (h * (tx ? 0.45 : 0.3));
+                    colour(0.23f, 0.33f, 0.1f, 0.8f + 0.35f * r2, col);
+                    fxQuad(out, p + bu * (h * 0.5), side, bu * (h * 0.5), col[0], col[1], col[2], fade);
+                } else if (stone) {
                     V3 t1 = std::fabs(up.y) < 0.9 ? norm(cross(up, V3(0, 1, 0))) : norm(cross(up, V3(1, 0, 0)));
                     V3 t2 = cross(up, t1);
-                    double ang = r1 * 6.283, ca = std::cos(ang), sa = std::sin(ang);
+                    double ang = (g.a3 / 256.0 + r1 * 0.1) * 6.283, ca = std::cos(ang), sa = std::sin(ang);
                     V3 a1 = t1 * ca + t2 * sa, a2 = t2 * ca - t1 * sa;
-                    if (moss) {
-                        double sz = 0.16 + g.a4 / 255.0 * 0.7 + r2 * 0.08;
-                        float v = 0.8f + 0.35f * r2;
-                        tint(0.23f, 0.33f, 0.1f, v, col);
-                        fxQuad(rend.fx, p + up * 0.015, a1 * sz, a2 * sz, col[0], col[1], col[2], (textured ? 1.f : 0.85f) * fade);
-                    } else {
-                        double sz = 0.04 + g.a4 / 255.0 * 0.14;
-                        float v = 0.75f + 0.4f * r2;
-                        tint(0.45f, 0.43f, 0.39f, v, col);
-                        fxQuad(rend.fx, p + up * (sz * 0.4), a1 * sz, a2 * (sz * 0.8), col[0], col[1], col[2], fade);
-                    }
+                    double w = (0.04 + g.a4 / 255.0 * 0.14) * (K ? K->width / 0.5 : 1), hh = w * (K ? std::max(0.3f, K->height / K->width) : 0.5);
+                    colour(0.45f, 0.43f, 0.39f, 0.75f + 0.4f * r2, col);
+                    fxQuad(out, p + up * (hh * 0.5), a1 * w, a2 * w, col[0], col[1], col[2], fade);
                 } else {
-                    // (touffe : quelques brins inclinés, tournés vers la caméra autour de leur axe)
-                    int nb = turf ? 7 : 5;
-                    double h0 = turf ? 0.22 : 0.3 + g.kind * 0.02;
+                    // (touffe : brins de gazon ou feuilles de sous-bois, inclinés, tournés vers la caméra autour de leur axe)
+                    int nb = turf ? 7 : (K ? std::clamp(K->leaves, 2, 8) : 5);
+                    double h0 = turf ? 0.22 : (0.3 + (g.a4 / 255.0) * 0.25) * (K ? K->height : 1);
                     for (int j = 0; j < nb; j++) {
                         float q1 = hash01(k, 10 + j), q2 = hash01(k, 30 + j), q3 = hash01(k, 50 + j);
                         V3 off = V3((q1 - 0.5) * 0.25, 0, (q2 - 0.5) * 0.25);
-                        V3 bu = norm(up + V3((q1 - 0.5) * 0.6, 0, (q3 - 0.5) * 0.6));
+                        V3 bu = norm(up + V3((q1 - 0.5) * (turf ? 0.6 : 1.2), 0, (q3 - 0.5) * (turf ? 0.6 : 1.2)));
                         double h = h0 * (0.6 + 0.8 * q3);
                         V3 side = cross(bu, view);
                         if (len(side) < 1e-3) side = camR;
-                        side = norm(side) * (turf ? 0.018 : 0.035);
-                        float v = 0.75f + 0.4f * q2;
-                        float rr = turf ? 0.33f : 0.3f + 0.08f * float(g.kind % 3), gg = turf ? 0.5f : 0.45f, bb = turf ? 0.14f : 0.13f;
-                        tint(rr, gg, bb, v, col);
-                        fxQuad(rend.fx, p + off + bu * (h * 0.5), textured ? side * 1.6 : side, bu * (h * 0.5), col[0], col[1], col[2], fade);
+                        double w = turf ? (tx ? 0.03 : 0.018) : (tx ? h * 0.45 * (K ? K->width : 1) : 0.035);
+                        side = norm(side) * w;
+                        colour(turf ? 0.33f : 0.3f, turf ? 0.5f : 0.45f, turf ? 0.14f : 0.13f, 0.75f + 0.4f * q2, col);
+                        fxQuad(out, p + off + bu * (h * 0.5), side, bu * (h * 0.5), col[0], col[1], col[2], fade);
                     }
                 }
             }
         }
-        b.count = uint32_t(rend.fx.size()) - b.first;
-        if (b.count) rend.fxBatches.push_back(b);
+        for (auto& [key, verts] : byTex) {
+            if (verts.empty()) continue;
+            FxBatch b;
+            b.first = uint32_t(rend.fx.size());
+            b.mode = stone ? 0 : 7;
+            if (!key.empty())
+                if (TexSlot* t = texture(key, true); t && t->st == TexSlot::Ok && t->tex.set) { b.tex = t->tex.set; b.mode = 1; }
+            rend.fx.insert(rend.fx.end(), verts.begin(), verts.end());
+            b.count = uint32_t(verts.size());
+            rend.fxBatches.push_back(b);
+        }
     }
 }
 
@@ -1559,21 +1571,25 @@ TexSlot* Editor::texture(const std::string& name, bool optional) {
         struct R { TexData t; Bytes rgba; std::string why, standIn; AstcStats st; int kind = 0; };
         auto r = std::make_shared<R>();
         try {
-            std::string rel = g->texFile(name), want = name;
+            // (« Nom#9 » : couche 9 d'une texture en tableau, comme celles du feuillage)
+            std::string base = name;
+            int layer = 0;
+            if (auto h = name.rfind('#'); h != std::string::npos) { base = name.substr(0, h); layer = std::atoi(name.c_str() + h + 1); }
+            std::string rel = g->texFile(base), want = base;
             if (rel.empty()) {
                 // (absente du jeu : une voisine de la même famille, signalée comme remplaçante)
-                auto [sn, sf] = g->similarTex(name);
+                auto [sn, sf] = g->similarTex(base);
                 if (!sn.empty()) { rel = sf; want = sn; r->standIn = sn; }
             }
             if (rel.empty()) {
-                auto found = g->findAnywhere(name);
+                auto found = g->findAnywhere(base);
                 std::string where;
                 for (auto& f : found) where += (where.empty() ? "" : ", ") + f;
-                throw Error("introuvable : ni Tex/" + name + ".bntx.zs, ni dans un autre fichier de Tex/" +
+                throw Error("introuvable : ni Tex/" + base + ".bntx.zs, ni dans un autre fichier de Tex/" +
                             (where.empty() ? std::string(" ; aucun fichier du jeu ne porte ce nom") : " ; fichiers à ce nom : " + where));
             }
             // (cartes d'éclairage précalculé : en entier, ce sont des atlas où chaque objet n'a que quelques pixels)
-            r->t = bntxExtract(g->readTex(rel), want.rfind("RBake_", 0) == 0 ? 4096 : 1024, want);
+            r->t = bntxExtract(g->readTex(rel), want.rfind("RBake_", 0) == 0 ? 4096 : 1024, want, layer);
             if (r->t.code == 5 || r->t.code == 6) r->kind = 2;   // (BC4, BC5 : masques ou reliefs, pas des couleurs)
             // (BC6H : images en virgule flottante, comme les cartes d'éclairage précalculé ; envoyées telles quelles)
             else if (r->t.code >= 20) {

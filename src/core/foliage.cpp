@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "core/byml.hpp"
 #include "core/util.hpp"
 
 namespace te {
@@ -98,6 +99,7 @@ GroundLayer groundParse(const Bytes& d, const std::string& name) {
             g.a3 = r[3];
             g.a4 = r[4];
             g.kind = r[5];
+            g.a11 = r[11];
             L.pts.push_back(g);
         }
         cell.end = uint32_t(L.pts.size());
@@ -105,6 +107,109 @@ GroundLayer groundParse(const Bytes& d, const std::string& name) {
     }
     return L;
 }
+
+// ---- réglages de la couverture du sol (Pack/Foliage.pack)
+namespace {
+struct FolPack {
+    std::shared_ptr<const Sarc> p;
+    // « Work/Foliage/ResX/Y.game__foliage__ResX.gyml » -> membre « Foliage/ResX/Y.game__foliage__ResX.bgyml »
+    const Value* get(const std::string& work, std::vector<Document>& keep) {
+        if (!p) return nullptr;
+        std::string m = work.rfind("Work/", 0) == 0 ? work.substr(5) : work;
+        if (endsWith(m, ".gyml")) m = m.substr(0, m.size() - 5) + ".bgyml";
+        const Bytes* b = p->get(m);
+        if (!b) return nullptr;
+        try { keep.push_back(bymlLoad(*b)); } catch (...) { return nullptr; }
+        return keep.back().root.isMap() ? &keep.back().root : nullptr;
+    }
+    std::vector<std::string> list(const std::string& work, const char* key, std::vector<Document>& keep) {
+        std::vector<std::string> v;
+        if (auto r = get(work, keep))
+            if (auto a = r->get(key); a && a->isArray())
+                for (auto& x : *a->a) if (x.t == T::String) v.push_back(x.s);
+        return v;
+    }
+};
+float num(const Value* m, const char* k, float d) {
+    if (!m || !m->isMap()) return d;
+    auto v = m->get(k);
+    if (!v) return d;
+    if (v->t == T::F32 || v->t == T::F64) return float(v->f);
+    if (v->t == T::I32 || v->t == T::U32 || v->t == T::I64) return float(v->i);
+    return d;
+}
+int indexIn(const std::vector<std::string>& arr, const std::string& tex) {
+    for (size_t i = 0; i < arr.size(); i++) if (arr[i] == tex) return int(i);
+    return -1;
+}
+void fillKinds(FolPack& P, GroundLayer& L, std::vector<Document>& keep) {
+    std::string ln = lower(L.name);
+    auto stem = [](const std::string& w) { std::string b = w.substr(w.rfind('/') + 1); return b.substr(0, b.find('.')); };
+    if (ln.find("moss") != std::string::npos) {
+        L.texArray = "Foliage_Moss_Alb";
+        auto arr = P.list("Work/Foliage/ResTexArray/Moss.game__foliage__ResTexArray.gyml", "TexList", keep);
+        for (auto& m : P.list("Work/Foliage/ResMossList/Default.game__foliage__ResMossList.gyml", "MossList", keep)) {
+            GroundKind k;
+            k.res = stem(m);
+            for (auto& t : P.list(m, "MossTexNameList", keep)) if (int i = indexIn(arr, t); i >= 0) k.texLayers.push_back(i);
+            L.kinds.push_back(k);
+        }
+    } else if (ln.find("stone") != std::string::npos) {
+        L.texArray = "Foliage_Stone_Alb";
+        auto arr = P.list("Work/Foliage/ResTexArray/Stone.game__foliage__ResTexArray.gyml", "TexList", keep);
+        for (auto& m : P.list("Work/Foliage/ResStoneList/Default.game__foliage__ResStoneList.gyml", "StoneList", keep)) {
+            GroundKind k;
+            k.res = stem(m);
+            if (auto r = P.get(m, keep)) {
+                if (auto t = r->get("StoneTexName"); t && t->t == T::String)
+                    if (int i = indexIn(arr, t->s); i >= 0) k.texLayers.push_back(i);
+                float c = num(r, "ColorScale", 1);
+                k.color[0] = k.color[1] = k.color[2] = c;
+                k.width = num(r, "WidthRate", 0.5f);
+                k.height = num(r, "HeightRate", 0.25f);
+            }
+            L.kinds.push_back(k);
+        }
+    } else if (ln.find("turf") != std::string::npos) {
+        L.texArray = "Foliage_Turf_Alb";
+        auto arr = P.list("Work/Foliage/ResTexArray/Turf.game__foliage__ResTexArray.gyml", "TexList", keep);
+        for (auto& m : P.list("Work/Foliage/ResTurfList/Default.game__foliage__ResTurfList.gyml", "TurfList", keep)) {
+            GroundKind k;
+            k.res = stem(m);
+            if (auto r = P.get(m, keep))
+                if (auto tl = r->get("TexList"); tl && tl->isArray() && !tl->a->empty()) {
+                    // (première variante : sa teinte ; les autres ne changent que la teinte et le poids)
+                    const Value& e = (*tl->a)[0];
+                    if (auto t = e.get("Tex"); t && t->t == T::String)
+                        if (int i = indexIn(arr, t->s); i >= 0) k.texLayers.push_back(i);
+                    if (auto c = e.get("ColorScale"))
+                        { k.color[0] = num(c, "R", 1); k.color[1] = num(c, "G", 1); k.color[2] = num(c, "B", 1); }
+                }
+            L.kinds.push_back(k);
+        }
+    } else {
+        L.texArray = "Foliage_ShootLeaf_Alb";
+        auto arr = P.list("Work/Foliage/ResTexArray/ShootLeaf.game__foliage__ResTexArray.gyml", "TexList", keep);
+        std::string list = ln.find("8") != std::string::npos ? "Default8Leaf" : "Default4Leaf";
+        for (auto& m : P.list("Work/Foliage/ResShootLeafUndergrowthList/" + list + ".game__foliage__ResShootLeafUndergrowthList.gyml", "ShootLeafList", keep)) {
+            GroundKind k;
+            k.res = stem(m);
+            if (auto r = P.get(m, keep)) {
+                k.leaves = int(num(r, "NumLeaf", 4));
+                float lo = num(r, "ScaleMin", 0.6f), hi = num(r, "ScaleMax", 1.f);
+                k.height = 0.5f * (lo + hi);
+                if (auto sl = r->get("ShootLeaf"); sl && sl->t == T::String)
+                    if (auto leaf = P.get(sl->s, keep)) {
+                        k.width = num(leaf, "LeafSizeScale", 1) * 0.5f + 0.5f;
+                        if (auto t = leaf->get("LeafTexName"); t && t->t == T::String)
+                            if (int i = indexIn(arr, t->s); i >= 0) k.texLayers.push_back(i);
+                    }
+            }
+            L.kinds.push_back(k);
+        }
+    }
+}
+}  // namespace
 
 std::vector<GroundLayer> groundLoad(Game& g, const std::string& pre, std::string* status) {
     std::vector<GroundLayer> out;
@@ -120,10 +225,15 @@ std::vector<GroundLayer> groundLoad(Game& g, const std::string& pre, std::string
             total += out.back().pts.size();
         } catch (const std::exception&) {}
     }
+    FolPack P;
+    try { if (g.exists("Pack/Foliage.pack.zs")) P.p = g.pack("Pack/Foliage.pack.zs"); } catch (...) {}
+    std::vector<Document> keep;
+    for (auto& L : out) try { fillKinds(P, L, keep); } catch (...) {}
     if (status) {
         std::string l;
         for (auto& L : out) l += (l.empty() ? "" : ", ") + L.name + fmt(" %zu", L.pts.size());
         *status = out.empty() ? "couverture du sol : aucune" : fmt("couverture du sol : %zu points (", total) + l + ")";
+        if (!P.p) *status += " ; Pack/Foliage.pack absent : textures et teintes inconnues";
     }
     return out;
 }

@@ -26,9 +26,24 @@ struct FoliageSet {
 // par point : position dans la case (3 octets, 1/64 m), deux octets de réglage (taille…), sorte, orientation de
 // la surface (octet 6 : direction autour de la verticale ; octet 7 : 255 = surface horizontale), autres réglages.
 // Vérifié sur la forêt Kokiri : les plantes posées tombent à quelques centimètres de la mousse et du sous-bois.
-struct GroundPt { float p[3]; float n[3]; uint8_t a3, a4, kind; };
+struct GroundPt { float p[3]; float n[3]; uint8_t a3, a4, kind, a11; };
 struct GroundCell { float c[3]; uint32_t begin, end; };
-struct GroundLayer { std::string name; std::vector<GroundCell> cells; std::vector<GroundPt> pts; };
+// Sorte de couverture, d'après Pack/Foliage.pack (ResMossList, ResStoneList, ResTurfList,
+// ResShootLeafUndergrowthList) : couches de la texture en tableau (Foliage_<Moss|Stone|Turf|ShootLeaf>_Alb, rangées
+// comme ResTexArray/<…>), teinte, taille. Le numéro de sorte d'un point (octet 5 ; octet 11 pour le gazon) y renvoie.
+struct GroundKind {
+    std::string res;               // (fiche du jeu, pour le bilan)
+    std::vector<int> texLayers;    // (couches de la texture en tableau ; vide = inconnue)
+    float color[3] = {1, 1, 1};    // (teinte multipliée à la texture : ColorScale…)
+    float width = 1, height = 1;   // (tailles relatives : WidthRate/HeightRate des cailloux, ScaleMin..Max du sous-bois…)
+    int leaves = 4;                // (sous-bois : feuilles par touffe)
+};
+struct GroundLayer {
+    std::string name, texArray;    // (texArray : « Foliage_Moss_Alb »…)
+    std::vector<GroundCell> cells;
+    std::vector<GroundPt> pts;
+    std::vector<GroundKind> kinds;
+};
 GroundLayer groundParse(const Bytes& flnt, const std::string& name);   // (Error si ce n'en est pas une)
 std::vector<GroundLayer> groundLoad(Game& g, const std::string& scenePrefix, std::string* status);
 
