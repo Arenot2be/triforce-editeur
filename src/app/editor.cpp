@@ -697,7 +697,7 @@ void Editor::render(VkCommandBuffer c) {
                     for (size_t i = 0; i < g->subs.size(); i++) {
                         if (!showTextures || g->subs[i].tex.empty()) continue;
                         auto& s = g->subs[i];
-                        sets[i] = {ready(s.tex), ready(s.tex2, true), ready(s.detail, true), showRelief ? data(s.nmap) : VK_NULL_HANDLE,
+                        sets[i] = {ready(s.tex), ready(s.tex2, true), s.layered ? data(s.detail) : ready(s.detail, true), showRelief ? data(s.nmap) : VK_NULL_HANDLE,
                                    showRelief ? data(s.rgh) : VK_NULL_HANDLE, showRelief ? data(s.nmap2) : VK_NULL_HANDLE, data(s.rah2)};
                     }
                     // (éclairage précalculé de cet objet, d'après son Hash : la carte de sa case et la place de chaque partie)
@@ -761,7 +761,7 @@ void Editor::render(VkCommandBuffer c) {
             for (size_t i = 0; i < g->subs.size(); i++) {
                 if (!showTextures || g->subs[i].tex.empty()) continue;
                 auto& sb = g->subs[i];
-                sets[i] = {ready(sb.tex), ready(sb.tex2, true), ready(sb.detail, true), showRelief ? data(sb.nmap) : VK_NULL_HANDLE,
+                sets[i] = {ready(sb.tex), ready(sb.tex2, true), sb.layered ? data(sb.detail) : ready(sb.detail, true), showRelief ? data(sb.nmap) : VK_NULL_HANDLE,
                            showRelief ? data(sb.rgh) : VK_NULL_HANDLE, showRelief ? data(sb.nmap2) : VK_NULL_HANDLE, data(sb.rah2)};
             }
             for (size_t k = 0; k < f.posRot.size(); k++) {

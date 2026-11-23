@@ -15,14 +15,17 @@ struct PC {
     float scale[4];
     float rot[4];
     float color[4];
+    // (recettes de mélange des matériaux du jeu : couleurs A, B, masque (a de m[0] : recette) ; scalaires du matériau)
+    float m[5][4];
 };
-static_assert(sizeof(PC) == 128, "constantes de 128 octets");
+static_assert(sizeof(PC) == 208, "constantes de 208 octets");
 
 struct GpuMesh {
     VkBuf vb, ib;
     struct Sub { uint32_t start, count; std::string tex; int kind = 0; std::string nrm, flow;
                  std::string tex2, detail, mat; int matIndex = 0;   // (kind 4 : couche posée par-dessus, opacité des sommets)
-                 std::string nmap, rgh, nmap2, rah2; int rghCh = 0; bool layered = false, rah = false, alphaTest = false; };
+                 std::string nmap, rgh, nmap2, rah2; int rghCh = 0; bool layered = false, rah = false, alphaTest = false;
+                 int recipe = 0; std::array<std::array<float, 4>, 5> mp{}; };
     std::vector<Sub> subs;
     bool translucent = false;   // (a des parties d'eau, de fondu ou de verre)
     float bbox[6] = {0, 0, 0, 0, 0, 0};

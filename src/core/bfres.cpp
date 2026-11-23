@@ -407,6 +407,24 @@ MatShader readMatShader(const R& r, size_t m, const std::vector<std::string>& te
     std::stable_sort(sampKeys.begin(), sampKeys.end(), [&](const std::string& a, const std::string& b) { return rank(a) < rank(b); });
     std::map<std::string, std::string> assign;
     for (int k = 0; k < nsamp && size_t(k) < sampKeys.size() && sp; k++) assign[sampKeys[size_t(k)]] = r.str(sp + 8 * size_t(k));
+    // (paramètres)
+    {
+        size_t info = r.ptr(sa + 0x20), data = r.ptr(m + 0x58);
+        size_t pd = r.ptr(sa + 0x28);
+        uint32_t np = pd ? r.u32(pd + 4) : 0;
+        if (info && data && np < 1024)
+            for (uint32_t k = 0; k < np; k++) {
+                size_t e = info + 24 * size_t(k);
+                if (e + 24 > r.n) break;
+                std::string n = shaderName(r.u64(e + 8));
+                size_t off = r.u16(e + 16);
+                int cnt = n.find("tex_mtx") != std::string::npos ? 6 : (n.find("color") != std::string::npos || n.find("vector") != std::string::npos) ? 4 : 1;
+                std::array<float, 6> v{};
+                for (int c = 0; c < cnt; c++) if (data + off + 4 * size_t(c) + 4 <= r.n) v[size_t(c)] = r.f(data + off + 4 * size_t(c));
+                if (cnt == 1) v[1] = v[2] = v[3] = v[0];
+                ms.params[n] = v;
+            }
+    }
     std::vector<std::string> fmatSamp = dictNames(r.ptr(m + 0x38), false);
     static const char* SLOT[] = {"_a0", "_n0", "_r0", "_m0", "_ao0", "_s0", "_a1", "_n1"};
     for (int n = 0; n < 8; n++) {
@@ -419,6 +437,12 @@ MatShader readMatShader(const R& r, size_t m, const std::vector<std::string>& te
         int tc = ms.optInt("ns_texture" + std::to_string(n) + "_texcoord", 0);
         int mp = ms.optInt("ns_texcoord" + std::to_string(tc) + "_mapping", 0);
         ms.slotUv[size_t(n)] = mp >= 0 && mp <= 3 ? mp : 0;
+        int srt = ms.optInt("ns_texcoord" + std::to_string(tc) + "_srt", -1);
+        ms.slotSrt[size_t(n)] = {1, 1, 0, 0};
+        if (srt >= 0) {
+            auto t = ms.param("ns_tex_mtx" + std::to_string(srt), {0, 1, 1, 0, 0, 0});
+            if (std::isfinite(t[1]) && std::isfinite(t[2]) && t[1] != 0 && t[2] != 0) ms.slotSrt[size_t(n)] = {t[1], t[2], t[4], t[5]};
+        }
     }
     return ms;
 }
@@ -558,14 +582,33 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
     auto shaderOf = [&](int mi) -> const MatShader* {
         return size_t(mi) < shaders.size() && shaders[size_t(mi)].archive == "Model" && !shaders[size_t(mi)].opts.empty() ? &shaders[size_t(mi)] : nullptr;
     };
-    // (coordonnées de la couleur et de la seconde couche d'un matériau, d'après ses réglages : _u0, _u1…)
-    auto uvSets = [&](int mi) -> std::pair<int, int> {
+    // (recette de mélange d'un matériau, d'après son graphe : 1 falaises (3552031828), 2 bois des maisons (4069519554),
+    //  3 roche et mousse des intérieurs (expression 4260383445) ; les textures de chaque rôle : A (couleur), B (seconde
+    //  couche), C (masque ou détail))
+    struct Recipe { int id = 0; int a = 0, b = -1, c = -1; };
+    auto recipeOf = [&](const MatShader* ms) {
+        Recipe rc;
+        if (!ms) return rc;
+        std::string g = ms->opt("ns_overwrite_surface_graph"), e = ms->opt("ns_expression_evaluate_graph");
+        if (g == "3552031828") rc = {1, 0, 3, 7};
+        else if (g == "4069519554") rc = {2, 0, 5, 3};
+        else if (e == "4260383445") rc = {3, 0, 3, -1};
+        else { int a = ms->select("albedo", 0); rc.a = a >= 0 && a < 8 ? a : 0; }
+        return rc;
+    };
+    // (coordonnées : attribut _uK et échelle, décalage de chaque rôle)
+    struct UvSpec { int attr = 0; std::array<float, 4> srt{1, 1, 0, 0}; };
+    auto uvSpecs = [&](int mi) -> std::array<UvSpec, 3> {
+        std::array<UvSpec, 3> out{};
         const MatShader* ms = shaderOf(mi);
-        if (!ms) return {0, 0};
-        int a = ms->select("albedo", 0);
-        int ua = a >= 0 && a < 8 && !ms->slot[size_t(a)].empty() ? ms->slotUv[size_t(a)] : ms->slotUv[0];
-        bool layered = ms->opt("ns_overwrite_surface_graph") == "3552031828";
-        return {ua, layered ? ms->slotUv[3] : ua};
+        if (!ms) return out;
+        Recipe rc = recipeOf(ms);
+        int roles[3] = {rc.a, rc.b, rc.c};
+        for (int k = 0; k < 3; k++) {
+            int sl = roles[k] >= 0 ? roles[k] : rc.a;
+            out[size_t(k)] = {ms->slotUv[size_t(sl)], ms->slotSrt[size_t(sl)]};
+        }
+        return out;
     };
     // (partie sans texture de couleur : eau, fondu, verre… d'après les noms du matériau et de ses textures)
     auto subOf = [&](uint32_t start, uint32_t count, int matIdx, const std::string& tex) {
@@ -598,16 +641,33 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
             if (ends(slotTex(rs), {"_rgh", "_rah", "_nrm"})) { s.rgh = slotTex(rs); s.rghCh = std::clamp(ms->optInt("ns_roughness_channel", 0), 0, 3); }
             s.alphaTest = ms->opt("ns_enable_alpha") == "1" || ms->opt("gsys_alpha_test_enable") == "1";
             std::string g = ms->opt("ns_overwrite_surface_graph");
-            if (g == "3552031828" && !slotTex(3).empty()) {
-                // (falaises de Kokiri… : roche (0 couleur, 1 normales, 2 RAH) et mousse (3, 4, 5), fondues par la pente,
-                //  les hauteurs des deux RAH et la couleur des sommets ; lu dans le programme du jeu)
+            Recipe rc = recipeOf(ms);
+            auto col = [&](const char* n) { auto v = ms->param(n); return std::array<float, 4>{v[0], v[1], v[2], 1}; };
+            auto sc = [&](int i) { return ms->param("ns_param_scalar" + std::to_string(i))[0]; };
+            if (rc.id && !slotTex(rc.b).empty()) {
                 s.layered = true;
-                s.tex = slotTex(0); s.nmap = slotTex(1); s.rgh = slotTex(2); s.rghCh = 0; s.rah = true;
-                s.tex2 = slotTex(3); s.nmap2 = slotTex(4); s.rah2 = slotTex(5);
+                s.recipe = rc.id;
+                s.tex = slotTex(rc.a);
+                s.tex2 = slotTex(rc.b);
+                s.detail = rc.c >= 0 ? slotTex(rc.c) : "";
+                if (rc.id == 1) {   // (roche 0-2, mousse 3-5, normales du modèle 6, masque d'occlusion 7)
+                    s.nmap = slotTex(1); s.rgh = slotTex(2); s.rah = true; s.rghCh = 0; s.nmap2 = slotTex(4); s.rah2 = slotTex(5);
+                    s.mp[0] = col("ns_param_color0"); s.mp[1] = col("ns_param_color1"); s.mp[2] = col("ns_param_color2");
+                } else if (rc.id == 2) {   // (bois 0-2, détail 3-4, mousse 5-7)
+                    s.nmap = slotTex(1); s.rgh = slotTex(2); s.rah = false; s.rghCh = 2; s.nmap2 = slotTex(6); s.rah2 = slotTex(7);
+                    s.mp[0] = col("ns_param_color0"); s.mp[1] = col("ns_param_color1"); s.mp[2] = {1, 1, 1, 1};
+                } else {   // (bois ou roche 0-2 × color1, mousse 3-5 × color0)
+                    s.nmap = slotTex(1); s.rgh = slotTex(2); s.rah = true; s.rghCh = 0; s.nmap2 = slotTex(4); s.rah2 = slotTex(5);
+                    s.mp[0] = col("ns_param_color1"); s.mp[1] = col("ns_param_color0"); s.mp[2] = {1, 1, 1, 1};
+                }
+                s.mp[3] = {sc(0), sc(1), sc(2), sc(3)};
+                s.mp[4] = {sc(5), sc(6), sc(7), sc(4)};
+                for (auto& v : s.mp) for (auto& x : v) if (!std::isfinite(x)) x = 1;
             }
             s.shaderInfo = "albedo " + ms->opt("ns_albedo_select", "0") + ", normales " + ms->opt("ns_normal_map_select", "-") +
                            ", rugosité " + ms->opt("ns_roughness_select", "-") + "/" + ms->opt("ns_roughness_channel", "0") +
-                           (g.empty() ? "" : ", graphe " + g) + (ms->opt("ns_expression_evaluate_graph").empty() ? "" : ", expression " + ms->opt("ns_expression_evaluate_graph"));
+                           (g.empty() ? "" : ", graphe " + g) + (ms->opt("ns_expression_evaluate_graph").empty() ? "" : ", expression " + ms->opt("ns_expression_evaluate_graph")) +
+                           (s.recipe ? fmt(", recette %d", s.recipe) : "");
         }
         if (!tex.empty() && endsWith(lower(s.material), "_sl")) s.kind = 4;
         if (tex.empty()) s.kind = surfaceKind(s.material, size_t(matIdx) < materials.size() ? materials[size_t(matIdx)] : std::vector<std::string>{});
@@ -659,6 +719,8 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                     m.uvs.push_back(uvs.empty() ? 0.f : uvs[k / 3 * 2 + 1]);
                     m.uvs2.push_back(m.uvs[m.uvs.size() - 2]);
                     m.uvs2.push_back(m.uvs.back());
+                    m.uvs3.push_back(m.uvs[m.uvs.size() - 2]);
+                    m.uvs3.push_back(m.uvs.back());
                     m.colors.insert(m.colors.end(), {1.f, 1.f, 1.f, 1.f});
                     m.bakeUvs.insert(m.bakeUvs.end(), {-1.f, -1.f});
                     m.normals.insert(m.normals.end(), {0.f, 0.f, 0.f});
@@ -694,19 +756,27 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
             if (!pa) throw Error("pas d'attribut de position");
             if (pa->buffer >= bufs.size()) throw Error("tampon de position absent");
             auto pts = attrValues(r, bufs[pa->buffer], *pa, vcount);
-            auto [uvA, uvB] = uvSets(matIdx);
-            auto readUv = [&](int set) {
+            auto specs = uvSpecs(matIdx);
+            std::map<int, std::vector<std::array<double, 4>>> uvCache;
+            std::function<const std::vector<std::array<double, 4>>&(int)> readUv = [&](int set) -> const std::vector<std::array<double, 4>>& {
+                auto it = uvCache.find(set);
+                if (it != uvCache.end()) return it->second;
                 std::vector<std::array<double, 4>> out;
                 const Attr* ua = pickAttr(attrs, "_u" + std::to_string(set));
-                if (!ua && set != 0) ua = pickAttr(attrs, "_u0");
                 if (ua && ua != pa && ua->buffer < bufs.size()) {
                     try { out = attrValues(r, bufs[ua->buffer], *ua, vcount); } catch (...) { out.clear(); }
                 }
-                return out;
+                if (out.empty() && set != 0) return readUv(0);
+                return uvCache[set] = out;
             };
-            std::vector<std::array<double, 4>> uvs = readUv(uvA);
-            if (uvs.empty() && uvA != 0) uvs = readUv(0);
-            std::vector<std::array<double, 4>> uvs2 = uvB == uvA ? std::vector<std::array<double, 4>>{} : readUv(uvB);
+            std::vector<std::array<double, 4>> uvs = readUv(specs[0].attr);
+            const auto& uvsB = readUv(specs[1].attr);
+            const auto& uvsC = readUv(specs[2].attr);
+            auto put = [&](std::vector<float>& dst, const std::vector<std::array<double, 4>>& src, const UvSpec& sp, size_t k) {
+                double u = src.size() == vcount ? src[k][0] : 0, v = src.size() == vcount ? src[k][1] : 0;
+                dst.push_back(float(u * sp.srt[0] + sp.srt[2]));
+                dst.push_back(float(v * sp.srt[1] + sp.srt[3]));
+            };
             std::vector<std::array<double, 4>> cols, nrms, bakes;
             bool colLight = false;   // (couleur des sommets en demi-flottants, grise, autour de 1 : éclairage précalculé)
             for (auto& a : attrs) {
@@ -772,10 +842,9 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                     x = nx; y = ny; z = nz;
                 }
                 m.positions.push_back(float(x)); m.positions.push_back(float(y)); m.positions.push_back(float(z));
-                m.uvs.push_back(uvs.empty() ? 0.f : float(uvs[k][0]));
-                m.uvs.push_back(uvs.empty() ? 0.f : float(uvs[k][1]));
-                if (uvs2.size() == vcount) { m.uvs2.push_back(float(uvs2[k][0])); m.uvs2.push_back(float(uvs2[k][1])); }
-                else { m.uvs2.push_back(m.uvs[m.uvs.size() - 2]); m.uvs2.push_back(m.uvs.back()); }
+                put(m.uvs, uvs, specs[0], k);
+                put(m.uvs2, uvsB, specs[1], k);
+                put(m.uvs3, uvsC, specs[2], k);
                 if (bakes.size() == vcount) m.bakeUvs.insert(m.bakeUvs.end(), {float(bakes[k][0]), float(bakes[k][1])});
                 else m.bakeUvs.insert(m.bakeUvs.end(), {-1.f, -1.f});
                 if (nrms.size() == vcount) {
@@ -793,7 +862,9 @@ Mesh bfresRead(const Bytes& data, const std::string& prefer, size_t maxTriangles
                 // (couleurs gardées : r = éclairage précalculé des sommets (1 = neutre), a = opacité des couches « _sl »)
                 float light = colLight && cols.size() == vcount ? float(std::clamp(cols[k][0], 0.0, 2.5)) : 1.f;
                 float alpha = cols.size() == vcount ? float(cols[k][3]) : 1.f;
-                m.colors.insert(m.colors.end(), {light, light, light, alpha});
+                // (g : couleur des sommets telle quelle (rouge), pour les recettes de mélange du jeu ; 0,5 = neutre)
+                float paint = cols.size() == vcount && !colLight ? float(std::clamp(cols[k][0], 0.0, 1.0)) : 0.5f;
+                m.colors.insert(m.colors.end(), {light, paint, light, alpha});
             }
             for (uint32_t v : ids) m.indices.push_back(base + v + first);
             std::string tex = !uvs.empty() && size_t(matIdx) < materials.size() ? albedo(materials[size_t(matIdx)]) : "";

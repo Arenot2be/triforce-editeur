@@ -4,4 +4,5 @@ layout(push_constant) uniform PC {
     vec4 scale;   // xyz : échelle ; w : 1 si texturé
     vec4 rot;     // xyz : angles (radians, X puis Y puis Z) ; w : 1 si on dessine en fil de fer de sélection
     vec4 color;   // couleur sans texture
+    vec4 m[5];    // (recettes de mélange des matériaux : couleurs A, B, masque — m[0].a : n° de recette — puis scalaires)
 } pc;

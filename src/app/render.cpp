@@ -74,6 +74,9 @@ VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs
 }
 
 void Renderer::init() {
+    if (vk.props.limits.maxPushConstantsSize < sizeof(PC) || vk.props.limits.maxBoundDescriptorSets < 8)
+        throw Error(fmt("carte graphique trop limitée : %u octets de constantes (il en faut %zu), %u jeux de textures (il en faut 8)",
+                        vk.props.limits.maxPushConstantsSize, sizeof(PC), vk.props.limits.maxBoundDescriptorSets));
     VkPushConstantRange r{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC)};
     VkPipelineLayoutCreateInfo lc{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     lc.setLayoutCount = 1;
@@ -90,13 +93,13 @@ void Renderer::init() {
         VkPipelineLayout keep = layout;
         layout = meshLayout;
         // (sommet : position, coordonnées de texture, couleur du jeu)
-        meshPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 64,
+        meshPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 72,
                             {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 20},
-                             {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}, {4, 0, VK_FORMAT_R32G32_SFLOAT, 48}, {5, 0, VK_FORMAT_R32G32_SFLOAT, 56}},
+                             {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}, {4, 0, VK_FORMAT_R32G32_SFLOAT, 48}, {5, 0, VK_FORMAT_R32G32_SFLOAT, 56}, {6, 0, VK_FORMAT_R32G32_SFLOAT, 64}},
                             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
-        meshBlendPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 64,
+        meshBlendPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_MESH_FRAG, sizeof SPV_MESH_FRAG, 72,
                                  {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 20},
-                             {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}, {4, 0, VK_FORMAT_R32G32_SFLOAT, 48}, {5, 0, VK_FORMAT_R32G32_SFLOAT, 56}},
+                             {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}, {4, 0, VK_FORMAT_R32G32_SFLOAT, 48}, {5, 0, VK_FORMAT_R32G32_SFLOAT, 56}, {6, 0, VK_FORMAT_R32G32_SFLOAT, 64}},
                                  VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false, false, true);
         layout = keep;
     }
@@ -108,7 +111,7 @@ void Renderer::init() {
         check(vkCreatePipelineLayout(vk.dev, &wl, nullptr, &waterLayout), "vkCreatePipelineLayout (eau)");
         VkPipelineLayout keep = layout;
         layout = waterLayout;
-        waterPipe = pipeline(SPV_WATER_VERT, sizeof SPV_WATER_VERT, SPV_WATER_FRAG, sizeof SPV_WATER_FRAG, 64,
+        waterPipe = pipeline(SPV_WATER_VERT, sizeof SPV_WATER_VERT, SPV_WATER_FRAG, sizeof SPV_WATER_FRAG, 72,
                              {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true,
                              false, false, true);
         layout = keep;
@@ -161,9 +164,9 @@ void Renderer::init() {
 GpuMesh Renderer::upload(const Mesh& m) {
     GpuMesh g;
     size_t nv = m.positions.size() / 3;
-    std::vector<float> v(nv * 16);
+    std::vector<float> v(nv * 18);
     for (size_t i = 0; i < nv; i++) {
-        float* o = &v[i * 16];
+        float* o = &v[i * 18];
         std::memcpy(o, &m.positions[i * 3], 12);
         o[3] = i * 2 < m.uvs.size() ? m.uvs[i * 2] : 0.f;
         o[4] = i * 2 + 1 < m.uvs.size() ? m.uvs[i * 2 + 1] : 0.f;
@@ -175,13 +178,15 @@ GpuMesh Renderer::upload(const Mesh& m) {
         else o[12] = o[13] = -1.f;
         if (i * 2 + 1 < m.uvs2.size()) { o[14] = m.uvs2[i * 2]; o[15] = m.uvs2[i * 2 + 1]; }
         else { o[14] = o[3]; o[15] = o[4]; }
+        if (i * 2 + 1 < m.uvs3.size()) { o[16] = m.uvs3[i * 2]; o[17] = m.uvs3[i * 2 + 1]; }
+        else { o[16] = o[3]; o[17] = o[4]; }
     }
     g.vb = vk.upload(v.data(), v.size() * 4, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     g.ib = vk.upload(m.indices.data(), m.indices.size() * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     for (auto& s : m.subs) {
         int kind = s.tex.empty() ? s.kind : (s.kind == 4 ? 4 : 0);
         g.subs.push_back({s.start, s.count, s.tex, kind, s.nrm, s.flow, s.tex2, s.detail, s.material, s.matIndex,
-                          s.nmap, s.rgh, s.nmap2, s.rah2, s.rghCh, s.layered, s.rah, s.alphaTest});
+                          s.nmap, s.rgh, s.nmap2, s.rah2, s.rghCh, s.layered, s.rah, s.alphaTest, s.recipe, s.mp});
         if (kind) g.translucent = true;
     }
     std::memcpy(g.bbox, m.bbox, sizeof g.bbox);
@@ -278,7 +283,9 @@ void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const
         //  512 deux couches du jeu (graphe 3552031828), 4096 la rugosité est un RAH (hauteur dans B), 8192 découpe alpha)
         const auto& sb = g.subs[i];
         bool layered = sb.layered && t[0] && t[1];
-        int flags = (t[0] ? 1 : 0) | (t[0] && t[1] ? 2 : 0) | (t[0] && t[2] && !layered ? 4 : 0) | (kind == 4 ? 8 : 0) | (lm ? 16 : 0) |
+        for (int q = 0; q < 5; q++) for (int w = 0; w < 4; w++) p.m[q][w] = sb.mp[size_t(q)][size_t(w)];
+        p.m[0][3] = layered ? float(sb.recipe) : 0.f;
+        int flags = (t[0] ? 1 : 0) | (t[0] && t[1] ? 2 : 0) | (t[0] && t[2] ? 4 : 0) | (kind == 4 ? 8 : 0) | (lm ? 16 : 0) |
                     (t[0] && t[3] ? 32 : 0) | (t[0] && t[4] ? 64 | (sb.rghCh & 3) << 10 : 0) | (layered && t[5] ? 128 : 0) |
                     (layered && t[6] ? 256 : 0) | (layered ? 512 : 0) | (sb.rah ? 4096 : 0) | (sb.alphaTest ? 8192 : 0);
         if (lm) for (int q = 0; q < 4; q++) p.color[q] = bake->sub[i][size_t(q)];

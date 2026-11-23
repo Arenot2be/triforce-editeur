@@ -31,6 +31,14 @@ struct MatShader {
     std::map<std::string, std::string> opts;      // (options écrites dans le matériau)
     std::array<std::string, 8> slot;              // (texture du bfres pour cTexture0..7 ; "" = aucune)
     std::array<int, 8> slotUv{};                  // (attribut de coordonnées _uN de chaque texture)
+    std::array<std::array<float, 4>, 8> slotSrt{};  // (échelle u, v et décalage u, v de chaque texture : ns_tex_mtxK)
+    // (paramètres du matériau, d'après ShaderAssign+0x20 : 24 octets par paramètre, empreinte du nom en +8,
+    //  décalage u16 en +16 dans les données du matériau, FMAT+0x58 ; ns_tex_mtx : mode, échelle u, v, rotation, décalage u, v)
+    std::map<std::string, std::array<float, 6>> params;
+    std::array<float, 6> param(const std::string& k, std::array<float, 6> d = {1, 1, 1, 1, 0, 0}) const {
+        auto it = params.find(k);
+        return it == params.end() ? d : it->second;
+    }
     std::string opt(const std::string& k, const std::string& d = "") const {
         auto it = opts.find(k);
         return it == opts.end() ? d : it->second;

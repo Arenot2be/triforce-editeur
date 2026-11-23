@@ -38,4 +38,14 @@ class Mats:
             v=struct.unpack_from('<Q',d,sp+8*k)[0]
             if v: samp[sampk[k]]=s.str(v)
         # textures du matériau
-        return dict(name=nm,archive=arch,model=model,opts=opts,samplers=samp,allopts=optn)
+        # paramètres : ShaderAssign+0x20 (infos de 24 octets : empreinte +8, décalage u16 +16), données FMAT+0x58
+        params={}
+        info=saq[4]; data=struct.unpack_from('<Q',d,f+0x58)[0]
+        pn=s.hdic(saq[5])
+        for k in range(len(pn)):
+            e=info+24*k
+            h=struct.unpack_from('<Q',d,e+8)[0]; off=struct.unpack_from('<H',d,e+16)[0]
+            n=hname(h)
+            cnt=6 if 'tex_mtx' in n else 4 if ('color' in n or 'vector' in n or 'bake_st' in n) else 1
+            params[n]=tuple(round(x,4) for x in struct.unpack_from(f'<{cnt}f',d,data+off))
+        return dict(name=nm,archive=arch,model=model,opts=opts,samplers=samp,allopts=optn,params=params)

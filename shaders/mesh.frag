@@ -28,6 +28,7 @@ layout(location = 3) in vec3 vN;
 layout(location = 4) in vec2 vBake;
 layout(location = 5) in vec2 vUv2;
 layout(location = 6) flat in vec3 vEye;
+layout(location = 7) in vec2 vUv3;
 layout(location = 0) out vec4 outColor;
 // (carte de normales du jeu : x, y sur 8 bits, décodés comme lui (× 2,007874 − 1,007874), z reconstruit)
 vec3 decodeNrm(vec4 t) {
@@ -57,20 +58,43 @@ void main() {
     if ((flags & 1) != 0) {
         c = texture(uTex, vUv);
         if ((flags & 8) == 0 && c.a < ((flags & 8192) != 0 ? 0.5 : 0.35)) discard;
-        if ((flags & 4) != 0) {
+        if ((flags & 4) != 0 && (flags & 512) == 0) {
             vec3 d = texture(uDetail, vUv * 8.0).rgb;
             c.rgb *= mix(vec3(1.0), clamp(d * 2.0, 0.0, 2.0), 0.55);
         }
         if ((flags & 512) != 0) {
-            // (deux couches du jeu : la seconde — mousse — vient sur les faces tournées vers le haut, là où sa hauteur
-            //  (B du RAH) dépasse celle de la roche ; même forme que le graphe du jeu, ses réglages par défaut)
+            // (recettes de mélange lues dans les programmes du jeu ; m[0..2] : couleurs, m[3] : scalaires 0-3,
+            //  m[4] : scalaires 5, 6, 7 ; vCol.g : couleur des sommets, 0,5 = neutre)
+            int recipe = int(pc.m[0].a + 0.5);
             vec4 m = texture(uTex2, vUv2);
-            float hA = (flags & 4096) != 0 && (flags & 64) != 0 ? texture(uRgh, vUv).b : 0.5;
+            float hA = (flags & 64) != 0 ? texture(uRgh, vUv).b : 0.5;
             float hB = (flags & 256) != 0 ? texture(uRah2, vUv2).b : 0.5;
+            float v = clamp(vCol.g, 0.0, 1.0);
+            float s0 = pc.m[3].x, s1 = pc.m[3].y, s2 = pc.m[3].z, s3 = pc.m[3].w, s5 = pc.m[4].x, s6 = pc.m[4].y, s7 = pc.m[4].z;
+            float w = clamp(s1, 0.01, 1.0);
             float up = hasN ? n.y : abs(nf.y);
-            float t0 = clamp(up * 1.6 - 0.75, 0.0, 1.0) + (hB - 0.5) * 0.9;
-            layerK = clamp((t0 - hA * 0.6 + 0.05) / 0.25, 0.0, 1.0);
-            c.rgb = mix(c.rgb, m.rgb, layerK);
+            vec3 A = c.rgb * pc.m[0].rgb;
+            float k;
+            if (recipe == 1) {   // (falaises : graphe 3552031828)
+                float t0 = (clamp(up + s7, 0.0, 1.0) - 0.5) + (hB * 4.78 - 2.39 + s0);
+                k = clamp((hA - t0) / w, 0.0, 1.0);
+                if ((flags & 4) != 0 && abs(s5 - s6) > 1e-4) {
+                    float mk = clamp((texture(uDetail, vUv3).x - s6) / (s5 - s6), 0.0, 1.0);
+                    A = mix(A, m.rgb * pc.m[2].rgb, mk);
+                }
+            } else if (recipe == 2) {   // (bois des maisons : graphe 4069519554, détail multiplié)
+                float t0 = (clamp(up, 0.0, 1.0) - 0.5) + (hB - 0.5) * s7 + s0;
+                k = clamp((0.5 - t0) / w, 0.0, 1.0);
+                if ((flags & 4) != 0) A = clamp(A * (1.0 + clamp(s6, 0.0, 1.0) * (texture(uDetail, vUv3).rgb - 1.0)), 0.0, 1.0);
+            } else {   // (intérieurs : expression 4260383445, sans la pente)
+                float t0 = (hB - 0.5) * s2 + (v - 0.5) * s3 + s0;
+                k = clamp((hA - t0) / w, 0.0, 1.0);
+                v = 0.5;
+            }
+            // (couleur des sommets en « overlay » : 0,5 la laisse telle quelle)
+            float f = v < 0.5 ? 2.0 * v * (1.0 - k) : 1.0 - 2.0 * k * (1.0 - v);
+            layerK = clamp(f, 0.0, 1.0);
+            c.rgb = mix(A, m.rgb * pc.m[1].rgb, layerK);
         } else if ((flags & 2) != 0) {
             vec4 m = texture(uTex2, vUv * 4.0);
             // (moitié haute : la mousse vient sur les dessus ; sans normale du modèle, le côté est inconnu : |y|)

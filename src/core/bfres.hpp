@@ -1,5 +1,6 @@
 // Géométrie des modèles BFRES Switch (versions 9 et 10), comme triforce_modkit/bfres.py.
 #pragma once
+#include <array>
 #include <string>
 #include <vector>
 
@@ -17,11 +18,13 @@ struct Mesh {
         //  3552031828 (falaises : roche + mousse), normales et RAH de la seconde couche)
         std::string nmap, rgh, nmap2, rah2;
         int rghCh = 0;
+        int recipe = 0;                 // (recette de mélange du jeu : 1 falaises, 2 bois des maisons, 3 intérieurs)
+        std::array<std::array<float, 4>, 5> mp{};   // (couleurs A, B, masque ; scalaires 0-3 ; 5, 6, 7, 4)
         bool layered = false, rah = false, alphaTest = false;
         std::string shaderInfo;   // (résumé des réglages, pour le bilan)
     };
     std::vector<float> positions, uvs;   // (x, y, z) ; (u, v)
-    std::vector<float> uvs2;             // (u, v de la seconde couche des matériaux à deux couches ; sinon = uvs)
+    std::vector<float> uvs2, uvs3;       // (u, v de la seconde couche et du masque ou détail des recettes de mélange)
     std::vector<float> bakeUvs;          // (u, v par sommet : place dans la carte d'éclairage précalculé ; sans : -1)
     std::vector<float> normals;          // (x, y, z par sommet ; sans : 0, 0, 0)
     std::vector<float> colors;           // (par sommet : rgb = éclairage précalculé des sommets, 1 neutre ; a = opacité des couches)
