@@ -2040,17 +2040,30 @@ void Editor::setTerrain(const std::string& scene) {
     if (scene.empty() || !game) { terrainStatus = scene.empty() ? "aucun terrain" : ""; return; }
     terrainStatus = "chargement…";
     Game* g = game.get();
-    jobs.add(0, [this, scene, g]() -> std::function<void()> {
+    bool withSub = terrainSub;
+    jobs.add(0, [this, scene, g, withSub]() -> std::function<void()> {
         auto tl = std::make_shared<std::vector<TerrainTile>>();
         auto vv = std::make_shared<std::vector<TerrVert>>();
         auto ii = std::make_shared<std::vector<uint32_t>>();
         auto ids = std::make_shared<std::vector<uint8_t>>(), wts = std::make_shared<std::vector<uint8_t>>();
         auto grid = std::make_shared<int>(0);
         auto table = std::make_shared<std::vector<std::array<float, 3>>>();
+        auto subCount = std::make_shared<size_t>(0);
         std::string why;
         try {
             for (auto& m : terrainMaterials(*g, scene)) table->push_back({float(m.layer), m.u, m.v});
             *tl = terrainBuild(*g, scene);
+            // (terrain d'appoint « <scène>_sub » (ex. KokiriForest_01_sub) : mêmes matières, mêmes coordonnées, d'autres
+            //  tuiles ; le jeu le dessine avec le principal)
+            if (withSub && !endsWith(scene, "_sub"))
+                for (auto& sc : terrainScenes(*g))
+                    if (sc == scene + "_sub") {
+                        try {
+                            auto more = terrainBuild(*g, sc);
+                            *subCount = more.size();
+                            for (auto& t : more) tl->push_back(std::move(t));
+                        } catch (...) {}
+                    }
             bool allMat = !tl->empty();
             for (auto& t : *tl) { *grid = std::max(*grid, t.n); if (t.ids.empty()) allMat = false; }
             if (allMat) {
@@ -2095,7 +2108,7 @@ void Editor::setTerrain(const std::string& scene) {
         } catch (const std::exception& e) {
             why = e.what();
         }
-        return [this, scene, tl, vv, ii, ids, wts, grid, table, why] {
+        return [this, scene, tl, vv, ii, ids, wts, grid, table, why, subCount] {
             if (terrainScene != scene) return;
             if (!why.empty()) { terrainStatus = "terrain illisible : " + why; return; }
             size_t nt = tl->size();
@@ -2104,6 +2117,7 @@ void Editor::setTerrain(const std::string& scene) {
             rend.setTerrainTable(*table);
             terrainMatTable = table->size();
             terrainStatus = fmt("%zu tuiles", tiles.size());
+            if (*subCount) terrainStatus += fmt(" (dont %zu de %s_sub)", *subCount, scene.c_str());
         };
     });
 }

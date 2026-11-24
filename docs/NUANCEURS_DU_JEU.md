@@ -229,3 +229,13 @@ hmax) + h1) ; couleur et relief mêlés par t.
   ici — pas encore appliqués.
 - **DirectionalLightParam/dir_main** : direction (−0,398 ; −0,618 ; −0,678), couleur (1,30 ; 0,95 ; 0,65), intensité
   41,3 : soleil par défaut, remplacé en jeu par la palette.
+
+## TerrainArc (.tscb)
+
+- Les 25 scènes de terrain envoyées se lisent toutes avec le lecteur de l'éditeur : en-tête « TSCB », version 0x10D,
+  taille du monde à 0x10 (500 m ; 250 pour Death Mountain Crater, Dodongo, Fire Temple, Goron City, Ice Cavern ; 125
+  pour Zora's Domain), échelle des hauteurs à 0x14 (800 m), 90 matières (même table partout : couche, 3 flottants nuls,
+  répétitions u et v par mètre).
+- `KokiriForest_01_sub` : terrain d'appoint de la forêt Kokiri — les 114 tuiles qu'il décrit existent toutes dans le
+  principal, aux mêmes places (zone fine de 500 × 250 m au centre), avec leurs propres fichiers de hauteurs. L'éditeur
+  l'ajoute au terrain principal (case « + _sub »).

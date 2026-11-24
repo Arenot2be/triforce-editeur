@@ -230,7 +230,8 @@ public:
     std::string terrainMatStatus, terrainCmbStatus;   // (textures du sol : Tex/MaterialAlb, relief : Tex/MaterialCmb)
     bool terrainRelief = true;
     bool terrainMatAsked = false;
-    size_t terrainMatTable = 0;   // (matières décrites par le .tscb de la scène)
+    size_t terrainMatTable = 0;
+    bool terrainSub = true;   // (ajouter le terrain d'appoint « <scène>_sub » quand il existe)   // (matières décrites par le .tscb de la scène)
     void setTerrain(const std::string& scene);
     void loadTerrainMaterials();
     std::string autoTerrain() const;

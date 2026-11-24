@@ -857,6 +857,13 @@ void viewport(Editor& ed) {
         for (auto& s : ed.scenes) if (ImGui::Selectable(s.c_str(), s == ed.terrainScene)) ed.setTerrain(s);
         ImGui::EndCombo();
     }
+    if (!ed.terrainScene.empty() && std::find(ed.scenes.begin(), ed.scenes.end(), ed.terrainScene + "_sub") != ed.scenes.end()) {
+        ImGui::SameLine();
+        if (ImGui::Checkbox("+ _sub", &ed.terrainSub)) ed.setTerrain(ed.terrainScene);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Ajouter le terrain d'appoint %s_sub : mêmes tuiles et mêmes matières que le principal, ses propres\n"
+                              "hauteurs. Décocher s'il se superpose mal au terrain principal.", ed.terrainScene.c_str());
+    }
     ImGui::SameLine();
     ImGui::TextDisabled("%s", ed.terrainStatus.c_str());
     if (ImGui::IsItemHovered() && !ed.terrainMatStatus.empty()) ImGui::SetTooltip("%s", ed.terrainMatStatus.c_str());
