@@ -133,12 +133,12 @@ void Renderer::init() {
         check(vkCreatePipelineLayout(vk.dev, &tl, nullptr, &terrLayout), "vkCreatePipelineLayout (terrain)");
         VkPipelineLayout keep = layout;
         layout = terrLayout;
-        terrPipe = pipeline(SPV_TERRAIN_VERT, sizeof SPV_TERRAIN_VERT, SPV_TERRAIN_FRAG, sizeof SPV_TERRAIN_FRAG, 40,
-                            {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 28}},
+        terrPipe = pipeline(SPV_TERRAIN_VERT, sizeof SPV_TERRAIN_VERT, SPV_TERRAIN_FRAG, sizeof SPV_TERRAIN_FRAG, uint32_t(sizeof(TerrVert)),
+                            {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 28}, {3, 0, VK_FORMAT_R32_SFLOAT, 40}},
                             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
         passFor_ = shadowPass;
-        shadowTerrPipe = pipeline(SPV_TERRAIN_VERT, sizeof SPV_TERRAIN_VERT, SPV_SHADOW_T_FRAG, sizeof SPV_SHADOW_T_FRAG, 40,
-                                  {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 28}},
+        shadowTerrPipe = pipeline(SPV_TERRAIN_VERT, sizeof SPV_TERRAIN_VERT, SPV_SHADOW_T_FRAG, sizeof SPV_SHADOW_T_FRAG, uint32_t(sizeof(TerrVert)),
+                                  {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 28}, {3, 0, VK_FORMAT_R32_SFLOAT, 40}},
                                   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
         passFor_ = VK_NULL_HANDLE;
         layout = keep;

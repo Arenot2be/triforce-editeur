@@ -250,4 +250,79 @@ std::vector<TerrainTile> terrainBuild(const Game& game, const std::string& scene
     return out;
 }
 
+// ---- ombre ambiante précalculée ----
+namespace {
+// (adresse dans le rangement de la Switch : x en octets, y en rangées de blocs, wg GOB de large, bh GOB de haut)
+size_t gobAddr(size_t x, size_t y, size_t wg, size_t bh) {
+    size_t gx = x / 64, gy = y / 8, by = gy / bh, gi = gy % bh, xi = x % 64, yi = y % 8;
+    return (by * wg + gx) * 512 * bh + gi * 512 + (xi / 32) * 256 + (yi / 2) * 64 + ((xi % 32) / 16) * 32 + (yi % 2) * 16 + (xi % 16);
+}
+// (bloc BC4 → 16 valeurs)
+void bc4Block(const uint8_t* b, uint8_t out[16]) {
+    int e0 = b[0], e1 = b[1], pal[8] = {e0, e1, 0, 0, 0, 0, 0, 0};
+    if (e0 > e1) for (int k = 2; k < 8; k++) pal[k] = ((8 - k) * e0 + (k - 1) * e1) / 7;
+    else { for (int k = 2; k < 6; k++) pal[k] = ((6 - k) * e0 + (k - 1) * e1) / 5; pal[6] = 0; pal[7] = 255; }
+    uint64_t bits = 0;
+    for (int i = 0; i < 6; i++) bits |= uint64_t(b[2 + i]) << (8 * i);
+    for (int t = 0; t < 16; t++) out[t] = uint8_t(pal[(bits >> (3 * t)) & 7]);
+}
+}  // namespace
+
+std::vector<TerrainBake> terrainBakes(const Game& game, const std::string& scene, const std::string& variant) {
+    std::vector<TerrainBake> out;
+    fs::path root = game.path("TerrainArc");
+    std::error_code ec;
+    Scene sc;
+    try { sc = parseTscb(readFile(root / u8path(scene + ".tscb"))); } catch (...) { return out; }
+    fs::path folder = root / u8path(scene);
+    for (auto& [name, a] : sc.areas) {
+        fs::path f;
+        for (std::string v : {variant, std::string(), std::string("child"), std::string("adult")}) {
+            fs::path p = folder / u8path(name + (v.empty() ? "" : "." + v) + ".bake_ao.extm");
+            if (fs::is_regular_file(p, ec)) { f = p; break; }
+        }
+        if (f.empty()) continue;
+        try {
+            Bytes data;
+            std::vector<std::pair<size_t, size_t>> blobs;
+            tarb(readFile(f), data, blobs);
+            if (blobs.empty() || blobs[0].second < 139264) continue;
+            const size_t base = blobs[0].first, W = 65, wg = 17, bh = 8;
+            TerrainBake tb;
+            tb.cx = float(a.x * sc.world);
+            tb.cz = float(a.z * sc.world);
+            tb.side = float(a.size * sc.world);
+            tb.ao.assign(260 * 260, 255);
+            for (size_t by = 0; by < W; by++)
+                for (size_t bx = 0; bx < W; bx++) {
+                    size_t o = base + gobAddr(bx * 16, by, wg, bh);
+                    if (o + 8 > data.size()) continue;
+                    uint8_t v[16];
+                    bc4Block(&data[o], v);   // (canal R du BC5 : les 8 premiers octets)
+                    for (size_t t = 0; t < 16; t++) tb.ao[(by * 4 + t / 4) * 260 + bx * 4 + t % 4] = v[t];
+                }
+            out.push_back(std::move(tb));
+        } catch (...) {}
+    }
+    return out;
+}
+
+float terrainBakeAo(const std::vector<TerrainBake>& bakes, float x, float z) {
+    const TerrainBake* best = nullptr;
+    for (auto& b : bakes)
+        if (std::fabs(x - b.cx) <= b.side / 2 && std::fabs(z - b.cz) <= b.side / 2 && (!best || b.side < best->side)) best = &b;
+    if (!best) return 1.f;
+    // (texels 2 à 258 pour la tuile ; bilinéaire)
+    float u = 2.f + (x - (best->cx - best->side / 2)) / best->side * 256.f - 0.5f;
+    float v = 2.f + (z - (best->cz - best->side / 2)) / best->side * 256.f - 0.5f;
+    // (les bords de la texture (rangées 0 à 9, colonnes 250 et plus) portent des motifs en tirets : on s'en tient à
+    //  l'intérieur, le bord reprend le texel intérieur le plus proche)
+    u = std::clamp(u, 10.f, 249.f);
+    v = std::clamp(v, 10.f, 249.f);
+    int x0 = int(std::floor(u)), y0 = int(std::floor(v));
+    float fx = std::clamp(u - float(x0), 0.f, 1.f), fy = std::clamp(v - float(y0), 0.f, 1.f);
+    auto at = [&](int xx, int yy) { return float(best->ao[size_t(yy) * 260 + size_t(xx)]) / 255.f; };
+    return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
+}
+
 }  // namespace te

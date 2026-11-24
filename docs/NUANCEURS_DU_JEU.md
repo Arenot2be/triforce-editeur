@@ -239,6 +239,19 @@ hmax) + h1) ; couleur et relief mêlés par t.
 - `KokiriForest_01_sub` : variante complète du terrain de la forêt (dossier reçu : 102 .hght, 102 .mate, 42 .extm) —
   toutes ses tuiles existent dans le principal aux mêmes places ; aucune n'a de trou ; hauteurs de 100 à 138 m au centre
   (le sol des cartes de la forêt, vers y = 100–120) et 100 m plats sur les bords. Elle s'accompagne d'éclairages
-  précalculés « child » (`<tuile>.child.bake_ao.extm`, `.child.bake_gi.extm` : TARB, données compressées ; AO en blocs
-  de 8 octets à la manière de BC4 (code 06), GI en code 09, 0xCC000 octets — pas encore décodés). L'éditeur l'utilise à
+  précalculés « child » (voir ci-dessous). L'éditeur l'utilise à
   la place du principal pour les cartes « Child » (case « _sub (enfant) »).
+
+## Éclairages précalculés du terrain (.extm)
+
+- `<tuile>.<child|adult>.bake_ao.extm` et `.bake_gi.extm`, seulement pour les tuiles grossières (Kokiri : niveaux 0 à 2,
+  soit 21 tuiles). TARB ; en-tête des données : nombre de textures à 0x03 (AO 1, GI 6), code de format ensuite (06, 09),
+  taille 256 à 0x0C ; données à 0x34.
+- **AO** : une texture BC5 de 65 × 65 blocs (260 × 260 texels), rangée à la Switch avec 17 GOB de large et des blocs de
+  8 GOB (2 rangées de blocs : 139 264 octets) ; canal R = occlusion (blanc = dégagé), canal G presque partout à 1. La
+  tuile occupe à peu près les texels 2 à 258 ; les dix premières rangées et les colonnes au-delà de 250 portent des
+  motifs en tirets (bordure) : l'éditeur ne lit que l'intérieur. Appliqué : multiplie l'ambiance (sondes) du terrain,
+  tuile précalculée la plus fine qui couvre chaque sommet, interpolation bilinéaire.
+- **GI** : six textures de même taille et même rangement, en BC6H (blocs de 16 octets aux modes 1, 11, 12, 13, 14 ;
+  ex. bloc constant de mode 13 ≈ 0,00023) — sans doute un cube d'ambiance (±X, ±Y, ±Z). Pas encore appliqué : il faut
+  le décodage BC6H et l'échelle par rapport aux sondes.

@@ -112,6 +112,14 @@ int main(int argc, char** argv) {
                 e.at(std::sin(deg / 57.29578f), sun, sky);
                 std::printf("  %5.1f°  soleil %.3f %.3f %.3f   ciel %.4f %.4f %.4f\n", deg, sun[0], sun[1], sun[2], sky[0], sky[1], sky[2]);
             }
+        } else if (cmd == "bakeao") {   // romfs scène variante [png] -> ombre ambiante précalculée du terrain
+            Game g(u8path(argv[2]));
+            auto bk = terrainBakes(g, argv[3], argc > 4 ? argv[4] : "");
+            for (auto& b : bk) {
+                double sum = 0; int lo = 255;
+                for (size_t y = 2; y < 258; y++) for (size_t x = 2; x < 258; x++) { sum += b.ao[y * 260 + x]; lo = std::min<int>(lo, b.ao[y * 260 + x]); }
+                std::printf("tuile %.1f %.1f côté %.1f : moyenne %.3f, minimum %.3f\n", b.cx, b.cz, b.side, sum / (256.0 * 256 * 255), lo / 255.0);
+            }
         } else if (cmd == "tarb") {   // fichier TARB -> données décompressées
             Bytes raw = readFile(u8path(argv[2]));
             size_t z = 0;

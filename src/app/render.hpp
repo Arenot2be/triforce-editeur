@@ -46,7 +46,7 @@ struct LineVert { float p[3]; float c[4]; };
 struct FxVert { float p[3]; float uv[2]; float c[4]; };
 // (une suite de particules d'un même effet : sa texture, sa forme — voir shaders/fx.frag — et son mélange)
 struct FxBatch { VkDescriptorSet tex = VK_NULL_HANDLE; int mode = 0; bool additive = false; uint32_t first = 0, count = 0; };
-struct TerrVert { float p[3]; float c[4]; float t[3]; };   // (c.a : côté de la grille de la tuile ; t : place dans la tuile, n° de tuile)
+struct TerrVert { float p[3]; float c[4]; float t[3]; float ao = 1; };   // (ao : ombre ambiante précalculée du jeu)   // (c.a : côté de la grille de la tuile ; t : place dans la tuile, n° de tuile)
 
 class Renderer {
 public:

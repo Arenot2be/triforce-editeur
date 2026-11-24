@@ -16,6 +16,7 @@ layout(set = 4, binding = 0) uniform sampler2DArray uCmb;
 layout(location = 0) in vec4 vCol;
 layout(location = 1) in vec3 vW;
 layout(location = 2) in vec3 vTc;
+layout(location = 3) in float vAo;
 layout(location = 0) out vec4 outColor;
 
 // (comme le nuanceur du jeu, Shader/TerrainGround : les matières des 4 points voisins sont pondérées
@@ -105,10 +106,10 @@ void main() {
     // (sondes de la scène : teinte ambiante autour de la caméra)
     vec3 pa = probeAmbient(n);
     if (pa.x >= 0.0 && gameLight()) {
-        vec3 E = ndl * sunTint() * sunShadow(vW, n) + pa + localLights(vW, n, true);
+        vec3 E = ndl * sunTint() * sunShadow(vW, n) + pa * vAo + localLights(vW, n, true);
         outColor = vec4(sceneTone(fogApply(pow(max(col, vec3(0.0)), vec3(2.2)) * E, vW)), 1.0);
         return;
     }
-    vec3 litc = pa.x < 0.0 ? vec3(lit) : lit * (0.45 * sunTint() + 0.55 * pa);
+    vec3 litc = pa.x < 0.0 ? vec3(lit) * mix(1.0, vAo, 0.6) : lit * (0.45 * sunTint() + 0.55 * pa * vAo);
     outColor = vec4(gameTone(col * litc), 1.0);
 }

@@ -2043,7 +2043,8 @@ void Editor::setTerrain(const std::string& scene) {
     terrainStatus = "chargement…";
     Game* g = game.get();
     bool withSub = terrainSub;
-    jobs.add(0, [this, scene, g, withSub]() -> std::function<void()> {
+    bool child = terrainSub || lower(doc.path).find("child") != std::string::npos;
+    jobs.add(0, [this, scene, g, withSub, child]() -> std::function<void()> {
         auto tl = std::make_shared<std::vector<TerrainTile>>();
         auto vv = std::make_shared<std::vector<TerrVert>>();
         auto ii = std::make_shared<std::vector<uint32_t>>();
@@ -2051,6 +2052,7 @@ void Editor::setTerrain(const std::string& scene) {
         auto grid = std::make_shared<int>(0);
         auto table = std::make_shared<std::vector<std::array<float, 3>>>();
         auto subCount = std::make_shared<size_t>(0);
+        auto bakes = std::make_shared<std::vector<TerrainBake>>();
         std::string why;
         try {
             for (auto& m : terrainMaterials(*g, scene)) table->push_back({float(m.layer), m.u, m.v});
@@ -2063,6 +2065,8 @@ void Editor::setTerrain(const std::string& scene) {
                     if (sc == scene + "_sub") use = sc;
             *tl = terrainBuild(*g, use);
             if (use != scene) *subCount = tl->size();
+            // (ombre ambiante précalculée : variante de l'époque de la carte)
+            *bakes = terrainBakes(*g, use, child ? "child" : "adult");
             bool allMat = !tl->empty();
             for (auto& t : *tl) { *grid = std::max(*grid, t.n); if (t.ids.empty()) allMat = false; }
             if (allMat) {
@@ -2093,7 +2097,8 @@ void Editor::setTerrain(const std::string& scene) {
                         float px = t.cx - t.side / 2 + t.side * x / (n - 1), pz = t.cz - t.side / 2 + t.side * y / (n - 1);
                         auto c = matColor(t.mat[size_t(y * n + x)], std::isfinite(h) ? h : 0);
                         vv->push_back({{px, std::isfinite(h) ? h : 0.f, pz}, {c[0], c[1], c[2], float(n)},
-                                       {float(x) / float(n - 1), float(y) / float(n - 1), float(ti)}});
+                                       {float(x) / float(n - 1), float(y) / float(n - 1), float(ti)},
+                                       bakes->empty() ? 1.f : terrainBakeAo(*bakes, px, pz)});
                     }
                 for (int y = 0; y + 1 < n; y++)
                     for (int x = 0; x + 1 < n; x++) {
@@ -2107,7 +2112,8 @@ void Editor::setTerrain(const std::string& scene) {
         } catch (const std::exception& e) {
             why = e.what();
         }
-        return [this, scene, tl, vv, ii, ids, wts, grid, table, why, subCount] {
+        auto bakeCount = std::make_shared<size_t>(bakes->size());
+        return [this, scene, tl, vv, ii, ids, wts, grid, table, why, subCount, bakeCount] {
             if (terrainScene != scene) return;
             if (!why.empty()) { terrainStatus = "terrain illisible : " + why; return; }
             size_t nt = tl->size();
@@ -2117,6 +2123,7 @@ void Editor::setTerrain(const std::string& scene) {
             terrainMatTable = table->size();
             terrainStatus = fmt("%zu tuiles", tiles.size());
             if (*subCount) terrainStatus += fmt(" (variante %s_sub)", scene.c_str());
+            if (*bakeCount) terrainStatus += fmt(", ombre ambiante précalculée sur %zu tuiles", *bakeCount);
         };
     });
 }
