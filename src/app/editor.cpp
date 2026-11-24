@@ -213,7 +213,9 @@ void Editor::openMap(const std::string& rel) {
         rebuildCats();
         fitAll();
         std::string sc = autoTerrain();
-        if (sc != terrainScene) setTerrain(sc);
+        // (variante « _sub » du terrain : par défaut pour les cartes de l'époque enfant)
+        bool child = lower(rel).find("child") != std::string::npos;
+        if (sc != terrainScene || child != terrainSub) { terrainSub = child; setTerrain(sc); }
         try { bake = bakeLoad(*game, bakePrefix(rel), &bakeStatus); } catch (const std::exception& e) { bake.clear(); bakeStatus = e.what(); }
         // (feuillage de la scène : lu à part, puis rangé par modèle avec la rotation de chaque plante)
         foliage.clear();
@@ -2052,18 +2054,15 @@ void Editor::setTerrain(const std::string& scene) {
         std::string why;
         try {
             for (auto& m : terrainMaterials(*g, scene)) table->push_back({float(m.layer), m.u, m.v});
-            *tl = terrainBuild(*g, scene);
-            // (terrain d'appoint « <scène>_sub » (ex. KokiriForest_01_sub) : mêmes matières, mêmes coordonnées, d'autres
-            //  tuiles ; le jeu le dessine avec le principal)
+            // (variante « <scène>_sub » (ex. KokiriForest_01_sub, avec ses éclairages précalculés « child ») : un terrain
+            //  complet — mêmes tuiles, mêmes matières, d'autres hauteurs — qui remplace le principal pour les cartes
+            //  de l'époque enfant)
+            std::string use = scene;
             if (withSub && !endsWith(scene, "_sub"))
                 for (auto& sc : terrainScenes(*g))
-                    if (sc == scene + "_sub") {
-                        try {
-                            auto more = terrainBuild(*g, sc);
-                            *subCount = more.size();
-                            for (auto& t : more) tl->push_back(std::move(t));
-                        } catch (...) {}
-                    }
+                    if (sc == scene + "_sub") use = sc;
+            *tl = terrainBuild(*g, use);
+            if (use != scene) *subCount = tl->size();
             bool allMat = !tl->empty();
             for (auto& t : *tl) { *grid = std::max(*grid, t.n); if (t.ids.empty()) allMat = false; }
             if (allMat) {
@@ -2117,7 +2116,7 @@ void Editor::setTerrain(const std::string& scene) {
             rend.setTerrainTable(*table);
             terrainMatTable = table->size();
             terrainStatus = fmt("%zu tuiles", tiles.size());
-            if (*subCount) terrainStatus += fmt(" (dont %zu de %s_sub)", *subCount, scene.c_str());
+            if (*subCount) terrainStatus += fmt(" (variante %s_sub)", scene.c_str());
         };
     });
 }

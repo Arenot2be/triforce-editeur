@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <iostream>
 
+#include "core/zs.hpp"
 #include "core/astc.hpp"
 #include "core/bfres.hpp"
 #include "core/matshader.hpp"
@@ -111,6 +112,12 @@ int main(int argc, char** argv) {
                 e.at(std::sin(deg / 57.29578f), sun, sky);
                 std::printf("  %5.1f°  soleil %.3f %.3f %.3f   ciel %.4f %.4f %.4f\n", deg, sun[0], sun[1], sun[2], sky[0], sky[1], sky[2]);
             }
+        } else if (cmd == "tarb") {   // fichier TARB -> données décompressées
+            Bytes raw = readFile(u8path(argv[2]));
+            size_t z = 0;
+            for (size_t p = 8; p + 4 <= std::min<size_t>(raw.size(), 64); p++)
+                if (raw[p] == 0x28 && raw[p + 1] == 0xB5 && raw[p + 2] == 0x2F && raw[p + 3] == 0xFD) { z = p; break; }
+            out(Zs::unpackPlain(raw.data() + z, raw.size() - z), argv[3]);
         } else if (cmd == "agl") {   // romfs préfixe-de-scène -> réglages AGL du ciel et des ombres
             Game g(u8path(argv[2]));
             std::string st;
@@ -225,6 +232,12 @@ int main(int argc, char** argv) {
             for (auto& t : tiles) for (float h : t.h) if (h == h) sum += h;
             std::printf("%zu tuiles, n=%d, somme %.3f, centre %.3f %.3f %.3f\n", tiles.size(), tiles.empty() ? 0 : tiles[0].n, sum,
                         tiles.empty() ? 0 : tiles[0].cx, tiles.empty() ? 0 : tiles[0].cz, tiles.empty() ? 0 : tiles[0].side);
+            if (std::getenv("TE_TILES"))
+                for (auto& t : tiles) {
+                    float lo = 1e9f, hi = -1e9f, sum = 0; int nn = 0, holes = 0;
+                    for (float h : t.h) { if (h == h) { lo = std::min(lo, h); hi = std::max(hi, h); sum += h; nn++; } else holes++; }
+                    std::printf("tuile %.1f %.1f côté %.1f : %.1f à %.1f, moyenne %.2f, trous %d\n", t.cx, t.cz, t.side, lo, hi, nn ? sum / nn : 0.f, holes);
+                }
             if (std::getenv("TE_MAT")) {
                 auto mats = terrainMaterials(g, argv[3]);
                 std::printf("%zu matières :", mats.size());

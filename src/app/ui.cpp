@@ -859,10 +859,11 @@ void viewport(Editor& ed) {
     }
     if (!ed.terrainScene.empty() && std::find(ed.scenes.begin(), ed.scenes.end(), ed.terrainScene + "_sub") != ed.scenes.end()) {
         ImGui::SameLine();
-        if (ImGui::Checkbox("+ _sub", &ed.terrainSub)) ed.setTerrain(ed.terrainScene);
+        if (ImGui::Checkbox("_sub (enfant)", &ed.terrainSub)) ed.setTerrain(ed.terrainScene);
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Ajouter le terrain d'appoint %s_sub : mêmes tuiles et mêmes matières que le principal, ses propres\n"
-                              "hauteurs. Décocher s'il se superpose mal au terrain principal.", ed.terrainScene.c_str());
+            ImGui::SetTooltip("Utiliser la variante %s_sub à la place du terrain principal : un terrain complet (mêmes tuiles,\n"
+                              "mêmes matières, ses propres hauteurs) accompagné d'éclairages précalculés « child ».\n"
+                              "Cochée d'office pour les cartes dont le nom contient « Child ».", ed.terrainScene.c_str());
     }
     ImGui::SameLine();
     ImGui::TextDisabled("%s", ed.terrainStatus.c_str());

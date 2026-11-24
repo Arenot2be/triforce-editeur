@@ -236,6 +236,9 @@ hmax) + h1) ; couleur et relief mêlés par t.
   taille du monde à 0x10 (500 m ; 250 pour Death Mountain Crater, Dodongo, Fire Temple, Goron City, Ice Cavern ; 125
   pour Zora's Domain), échelle des hauteurs à 0x14 (800 m), 90 matières (même table partout : couche, 3 flottants nuls,
   répétitions u et v par mètre).
-- `KokiriForest_01_sub` : terrain d'appoint de la forêt Kokiri — les 114 tuiles qu'il décrit existent toutes dans le
-  principal, aux mêmes places (zone fine de 500 × 250 m au centre), avec leurs propres fichiers de hauteurs. L'éditeur
-  l'ajoute au terrain principal (case « + _sub »).
+- `KokiriForest_01_sub` : variante complète du terrain de la forêt (dossier reçu : 102 .hght, 102 .mate, 42 .extm) —
+  toutes ses tuiles existent dans le principal aux mêmes places ; aucune n'a de trou ; hauteurs de 100 à 138 m au centre
+  (le sol des cartes de la forêt, vers y = 100–120) et 100 m plats sur les bords. Elle s'accompagne d'éclairages
+  précalculés « child » (`<tuile>.child.bake_ao.extm`, `.child.bake_gi.extm` : TARB, données compressées ; AO en blocs
+  de 8 octets à la manière de BC4 (code 06), GI en code 09, 0xCC000 octets — pas encore décodés). L'éditeur l'utilise à
+  la place du principal pour les cartes « Child » (case « _sub (enfant) »).
