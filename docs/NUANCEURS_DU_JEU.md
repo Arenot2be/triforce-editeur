@@ -123,5 +123,7 @@ hmax) + h1) ; couleur et relief mêlés par t.
   - h0..h15 : lumière renvoyée RVB en harmoniques d'ordre 1 (Y00, y, z, x), avec la visibilité du ciel en h3, h7, h11, h15 ;
   - h16..h27 : second jeu RVB (B).
 - Éclairement : E = 0.886·L0 + 1.023·L1·n. Le ciel est pris constant (0.045, 0.06, 0.085) en attendant `Env/GameScene.*.genvb`.
+- Les quatre niveaux sont lus ; autour d'un point, seul le plus fin présent compte (niveau 0 : une sonde tous les 2 m).
+  Quelques sondes très fortes et orangées (près des lanternes, ex. −80, 115, −47) sont réelles : lumières locales cuites.
 - Dans l'éditeur : chaque objet reçoit l'ambiance des sondes voisines (pondération par l'inverse de la distance), normalisée
   par la luminance médiane ; le sol prend celle du point visé. Case « Sondes ».

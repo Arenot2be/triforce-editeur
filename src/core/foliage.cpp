@@ -310,22 +310,24 @@ ProbeSet probesParse(const std::vector<Bytes>& files) {
     for (auto& d : files) {
         if (d.size() < 0x80) continue;
         // (début des sondes : après 4³, 8³, 16³ ou 32³ cellules ; on vérifie que le nombre lu tombe juste)
-        size_t start = 0;
+        size_t start = 0, cells = 0;
         for (size_t hdr : {size_t(0x10), size_t(0x20)})
             for (size_t n : {4, 8, 16, 32}) {
                 size_t st = hdr + 48 * n * n * n + 0x24;
                 if (st > d.size() || st < 0x1c) continue;
                 uint32_t cnt = rd32(d, st - 0x1c);
-                if (st + size_t(cnt) * 72 == d.size() && cnt > 0) start = st;
+                if (st + size_t(cnt) * 72 == d.size() && cnt > 0) start = st, cells = n;
             }
         if (!start) continue;
         size_t cnt = (d.size() - start) / 72;
+        uint8_t level = cells == 32 ? 0 : cells == 16 ? 1 : cells == 8 ? 2 : 3;
         for (size_t k = 0; k < cnt; k++) {
             size_t o = start + 72 * k;
             float p[3];
             for (int i = 0; i < 3; i++) p[i] = rdf(d, o + 4 * size_t(i));
             if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) continue;
             ps.pos.insert(ps.pos.end(), p, p + 3);
+            ps.lvl.push_back(level);
             for (int i = 0; i < 28; i++) ps.sh.push_back(half2f(uint16_t(d[o + 16 + 2 * size_t(i)] | d[o + 17 + 2 * size_t(i)] << 8)));
         }
     }
@@ -355,8 +357,9 @@ void ProbeSet::index() {
 bool ProbeSet::ambient(const float p[3], float out[12]) const {
     if (grid.empty()) return false;
     int cx = int(std::floor(p[0] / 4)), cy = int(std::floor(p[1] / 4)), cz = int(std::floor(p[2] / 4));
-    // (les sondes des cases voisines, pondérées par l'inverse du carré de la distance)
-    double acc[28] = {}, wsum = 0;
+    // (les sondes des cases voisines, pondérées par l'inverse du carré de la distance ; seul compte le niveau le plus
+    //  fin présent autour du point, comme le jeu qui ne descend aux niveaux grossiers que là où les fins manquent)
+    double accL[4][28] = {}, wL[4] = {}, wsum = 0;
     for (int r = 1; r <= 4 && wsum == 0; r++)
         for (int x = cx - r; x <= cx + r; x++)
             for (int y = cy - r; y <= cy + r; y++)
@@ -366,12 +369,17 @@ bool ProbeSet::ambient(const float p[3], float out[12]) const {
                     for (uint32_t k : it->second) {
                         double dx = pos[3 * k] - p[0], dy = pos[3 * k + 1] - p[1], dz = pos[3 * k + 2] - p[2];
                         double w = 1.0 / (dx * dx + dy * dy + dz * dz + 1.0);
+                        int L = lvl.empty() ? 0 : std::min<int>(3, lvl[k]);
                         wsum += w;
-                        for (int i = 0; i < 28; i++) acc[i] += w * sh[28 * size_t(k) + size_t(i)];
+                        wL[L] += w;
+                        for (int i = 0; i < 28; i++) accL[L][i] += w * sh[28 * size_t(k) + size_t(i)];
                     }
                 }
     if (wsum == 0) return false;
-    for (double& v : acc) v /= wsum;
+    int best = 0;
+    while (best < 3 && wL[best] == 0) best++;
+    double acc[28];
+    for (int i = 0; i < 28; i++) acc[i] = accL[best][i] / wL[best];
     // (E(n) = 0,886·L0 + 1,023·(L1·n) pour A, B et le ciel × visibilité ; ordre des coefficients : Y00, y, z, x)
     float a[3], M[3][3];
     for (int c = 0; c < 3; c++) {
@@ -391,9 +399,8 @@ ProbeSet probesLoad(Game& g, const std::string& pre, std::string* status) {
     int n = 0;
     for (auto& f : g.allFiles()) {
         if (f.rfind(dir, 0) != 0) continue;
-        // (niveaux 1 et 2 et « resident » : assez fins, sans le poids du niveau 0)
-        bool lvl = f.find("_1.bkprb") != std::string::npos || f.find("_2.bkprb") != std::string::npos || f.find("resident.bkprcb") != std::string::npos;
-        if (!lvl) continue;
+        // (tous les niveaux : le plus fin, tous les 2 m, prime là où il existe)
+        if (f.find(".bkprb") == std::string::npos && f.find("resident.bkprcb") == std::string::npos) continue;
         try { files.push_back(g.read(f)); n++; } catch (...) {}
     }
     if (files.empty()) {

@@ -70,6 +70,7 @@ std::vector<SceneLight> lightsLoad(Game& g, const std::string& scenePrefix, std:
 struct ProbeSet {
     std::vector<float> pos;   // (x, y, z par sonde)
     std::vector<float> sh;    // (28 par sonde)
+    std::vector<uint8_t> lvl; // (niveau de la sonde : 0 = la plus fine, 32³ cases par bloc ; 3 = « resident »)
     size_t size() const { return pos.size() / 3; }
     // (éclairement ambiant autour d'un point, sous forme linéaire a + M·n, rapporté à l'éclairement médian vers le
     //  haut : out = (a.r, a.g, a.b, M.b.x, M.r.x, M.r.y, M.r.z, M.b.y, M.g.x, M.g.y, M.g.z, M.b.z) ; false sans sonde)
