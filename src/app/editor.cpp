@@ -14,6 +14,34 @@ namespace te {
 // (hauteur du soleil de l'éditeur : la direction L = (0,35 ; 1 ; 0,25) des nuanceurs, soit 66,7° d'élévation)
 static const float kSunMu = 0.91863f;
 
+std::string Editor::scenePrefix() const { return bakePrefix(doc.path); }
+
+void Editor::applyEnv() {
+    if (!game) return;
+    env = envLoad(*game, scenePrefix(), envHour, &envStatus);
+    // (soleil : direction forcée par la scène, sinon celle de l'éditeur ; azimut compté depuis +Z vers +X)
+    float d[3] = {0.32152f, 0.91863f, 0.22966f};
+    if (env.ok && env.forcedSun) {
+        double el = env.sunEl / 57.29578, az = env.sunAz / 57.29578;
+        d[0] = float(std::sin(az) * std::cos(el)); d[1] = float(std::sin(el)); d[2] = float(std::cos(az) * std::cos(el));
+    }
+    std::memcpy(sunDir, d, sizeof d);
+    // (sondes : ciel des tables d'atmosphère pour ce soleil, puis les échelles de la palette, en unités où le soleil
+    //  de la palette vaut 1 ; sans soleil (forêt perdue…), unité = intensité du ciel)
+    if (sky.ok) {
+        float sun[3], sl[3];
+        sky.at(sunDir[1], sun, sl);
+        for (int c = 0; c < 3; c++) probes.sky[c] = sl[c];
+    }
+    if (env.ok) {
+        float u = env.unit();
+        probes.scaleB = env.bounceScale * env.sunLux / u * env.ambientIntensity;
+        probes.scaleSky = env.skyBounceScale * env.skyLux / u * env.ambientIntensity;
+        probes.scaleA = env.ambientIntensity;
+    }
+    probeCache.clear();
+}
+
 static double now() {
     using namespace std::chrono;
     return duration<double>(steady_clock::now().time_since_epoch()).count();
@@ -213,6 +241,7 @@ void Editor::openMap(const std::string& rel) {
                     probes = std::move(*pr);
                     probesStatus = *sp;
                     probeCache.clear();
+                    applyEnv();
                     ground = std::move(*gl);
                     lights = std::move(*li);
                     groundStatus = *st;
@@ -641,10 +670,22 @@ void Editor::render(VkCommandBuffer c) {
     base.m[2][3] = gameTone ? toneExposure : 0.f;   // (courbe de tons du jeu : hdr_compose d'AglShader)
     // (teinte du soleil d'après la transmittance de l'atmosphère du jeu, pour la hauteur du soleil de l'éditeur ;
     //  rangée en (1, v/r, b/r) dans m[1].a et m[4].a, libres pour tous les dessins)
-    if (sky.ok && showProbes) {
-        float sun[3], sl[3];
-        sky.at(kSunMu, sun, sl);
-        if (sun[0] > 1e-3f) { base.m[1][3] = sun[1] / sun[0]; base.m[4][3] = sun[2] / sun[0]; }
+    if (showProbes && (env.ok || sky.ok)) {
+        // (couleur et force du soleil : 8 bits par canal sur [0, 2] ; direction : élévation et azimut au dixième de degré)
+        float sc[3] = {1, 1, 1};
+        if (env.ok) {
+            for (int c = 0; c < 3; c++) sc[c] = env.sunColor[c] * env.sunLux / env.unit();
+        } else {
+            float sl[3];
+            sky.at(sunDir[1], sc, sl);
+        }
+        auto q8 = [](float v) { return uint32_t(std::clamp(v * 0.5f, 0.f, 1.f) * 255.f + 0.5f); };
+        uint32_t packed = q8(sc[0]) << 16 | q8(sc[1]) << 8 | q8(sc[2]);
+        base.m[1][3] = float(std::max<uint32_t>(packed, 1));
+        double el = std::asin(std::clamp(double(sunDir[1]), 0.0, 1.0)) * 57.29578, az = std::atan2(double(sunDir[0]), double(sunDir[2])) * 57.29578;
+        if (az < 0) az += 360;
+        base.m[4][3] = float(1 + uint32_t(std::lround(el * 10)) * 4000 + uint32_t(std::lround(az * 10)) % 3600);
+        if (gameTone && env.ok && probes.size()) base.m[2][3] = std::max(1e-4f, env.exposure() * std::pow(2.f, expoComp));
     }
     // (sondes : l'ambiance autour du point visé pour le sol ; chaque objet a la sienne, plus bas)
     auto probeAt = [&](const void* key, V3 p, PC& out) {

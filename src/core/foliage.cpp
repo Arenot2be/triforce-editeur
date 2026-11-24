@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include <memory>
 #include "core/byml.hpp"
 #include "core/sarc.hpp"
 #include "core/util.hpp"
@@ -391,9 +392,10 @@ bool ProbeSet::ambient(const float p[3], float out[12]) const {
     // (E(n) = 0,886·L0 + 1,023·(L1·n) pour A, B et le ciel × visibilité ; ordre des coefficients : Y00, y, z, x)
     float a[3], M[3][3];
     for (int c = 0; c < 3; c++) {
-        double s = sky[c];
-        a[c] = float(0.886 * (acc[c] + acc[16 + c] + s * acc[3]) / ref);
-        double ly = acc[4 + c] + acc[19 + c] + s * acc[7], lz = acc[8 + c] + acc[22 + c] + s * acc[11], lx = acc[12 + c] + acc[25 + c] + s * acc[15];
+        double s = sky[c] * scaleSky, ka = scaleA, kb = scaleB;
+        a[c] = float(0.886 * (ka * acc[c] + kb * acc[16 + c] + s * acc[3]) / ref);
+        double ly = ka * acc[4 + c] + kb * acc[19 + c] + s * acc[7], lz = ka * acc[8 + c] + kb * acc[22 + c] + s * acc[11],
+               lx = ka * acc[12 + c] + kb * acc[25 + c] + s * acc[15];
         M[c][0] = float(1.023 * lx / ref); M[c][1] = float(1.023 * ly / ref); M[c][2] = float(1.023 * lz / ref);
     }
     float o[12] = {a[0], a[1], a[2], M[2][0], M[0][0], M[0][1], M[0][2], M[2][1], M[1][0], M[1][1], M[1][2], M[2][2]};
@@ -470,6 +472,100 @@ SkyEnv skyLoad(Game& g, std::string* status) {
     } catch (const std::exception& ex) {
         if (status) *status = std::string("ciel : ") + ex.what();
         return {};
+    }
+}
+
+// ---- palette d'environnement ----
+void kelvinToRgb(float T, float out[3]) {
+    double t = std::clamp(double(T), 1667.0, 25000.0), x, y;
+    if (t <= 4000) x = -0.2661239e9 / (t * t * t) - 0.2343589e6 / (t * t) + 0.8776956e3 / t + 0.179910;
+    else x = -3.0258469e9 / (t * t * t) + 2.1070379e6 / (t * t) + 0.2226347e3 / t + 0.240390;
+    if (t <= 2222) y = -1.1063814 * x * x * x - 1.34811020 * x * x + 2.18555832 * x - 0.20219683;
+    else if (t <= 4000) y = -0.9549476 * x * x * x - 1.37418593 * x * x + 2.09137015 * x - 0.16748867;
+    else y = 3.0817580 * x * x * x - 5.87338670 * x * x + 3.75112997 * x - 0.37001483;
+    double X = x / y, Y = 1, Z = (1 - x - y) / y;
+    out[0] = float(std::max(0.0, 3.2406 * X - 1.5372 * Y - 0.4986 * Z));
+    out[1] = float(std::max(0.0, -0.9689 * X + 1.8758 * Y + 0.0415 * Z));
+    out[2] = float(std::max(0.0, 0.0557 * X - 0.2040 * Y + 1.0570 * Z));
+}
+
+float EnvPalette::exposure() const { return unit() / (3.14159265f * 1.2f * std::pow(2.f, ev)); }
+
+EnvPalette envLoad(Game& g, const std::string& pre, int hour, std::string* status) {
+    EnvPalette e;
+    const std::string path = "Pack/EnvPalette.pack.zs";
+    try {
+        if (!g.exists(path)) { if (status) *status = "palette : pas de " + path; return e; }
+        Sarc s = Sarc::load(g.read(path));
+        auto doc = [&](const std::string& dir, const std::string& name, const char* type) -> std::unique_ptr<Document> {
+            const Bytes* b = s.get("WorldMgr/" + dir + "/" + name + ".game__wm__" + type + ".bgyml");
+            if (!b) return nullptr;
+            return std::make_unique<Document>(bymlLoad(*b));
+        };
+        // (table horaire de la scène : son nom, puis sans les suffixes « _xxx » un à un ; sinon le champ par beau temps)
+        std::unique_ptr<Document> tt;
+        std::string n = pre;
+        while (!n.empty() && !(tt = doc("ResEnvPaletteTimeTable", n, "ResEnvPaletteTimeTable"))) {
+            size_t k = n.find_last_of('_');
+            if (k == std::string::npos) n.clear(); else n.resize(k);
+        }
+        if (!tt) { n = "MainField_Bluesky"; tt = doc("ResEnvPaletteTimeTable", n, "ResEnvPaletteTimeTable"); }
+        if (!tt) { if (status) *status = "palette : pas de table horaire"; return e; }
+        e.table = n;
+        const Value& r = tt->root;
+        auto num = [](const Value* v, double d) { return v && v->isNum() ? v->num() : d; };
+        auto flag = [](const Value* v) { return v && v->t == T::Bool && v->b; };
+        e.forcedSun = flag(r.get("IsForceMainLight"));
+        e.sunEl = float(num(r.get("MainLight_Elevation"), 0));
+        e.sunAz = float(num(r.get("MainLight_Azimuth"), 0));
+        // (entrée de l'heure voulue : la dernière qui commence avant elle, sinon la dernière de la journée)
+        const Value* arr = r.get("TimeTableArray");
+        std::string pal;
+        if (arr && arr->isArray() && !arr->a->empty()) {
+            int best = -1, bestT = -1, lastT = -1;
+            std::string last;
+            for (size_t i = 0; i < arr->a->size(); i++) {
+                const Value& it = (*arr->a)[i];
+                int t = int(num(it.get("Hour"), 0)) * 60 + int(num(it.get("Min"), 0));
+                const Value* p = it.get("EnvPalette");
+                if (!p || p->t != T::String) continue;
+                if (t <= hour * 60 && t > bestT) { bestT = t; best = int(i); pal = p->s; }
+                if (t > lastT) { lastT = t; last = p->s; }
+            }
+            if (best < 0) pal = last;
+        }
+        // (« Work/WorldMgr/ResEnvPalette/X.game__wm__ResEnvPalette.gyml » → X)
+        size_t a = pal.find_last_of('/'), b = pal.find(".game__");
+        if (a != std::string::npos && b != std::string::npos && b > a) pal = pal.substr(a + 1, b - a - 1);
+        auto pd = doc("ResEnvPalette", pal, "ResEnvPalette");
+        if (!pd) { if (status) *status = "palette : " + pal + " introuvable"; return e; }
+        e.palette = pal;
+        const Value& q = pd->root;
+        e.sunLux = float(num(q.get("BgDifIntensity"), 1e4));
+        e.ev = float(num(q.get("ExposureValue"), 10));
+        e.skyLux = float(num(q.get("SkySunColorIntensity"), e.sunLux));
+        e.bounceScale = float(num(q.get("DirectionalLightBounceScale"), 1));
+        e.skyBounceScale = float(num(q.get("SkyLightBounceScale"), 1));
+        e.ambientIntensity = float(num(q.get("AmbientIntensity"), 1));
+        float col[3] = {1, 1, 1};
+        if (const Value* c = q.get("BgDifColor"); c && c->isMap()) {
+            col[0] = float(num(c->get("R"), 1)); col[1] = float(num(c->get("G"), 1)); col[2] = float(num(c->get("B"), 1));
+        }
+        float tc[3] = {1, 1, 1}, wb[3];
+        if (flag(q.get("BgDifUseTemperature"))) kelvinToRgb(float(num(q.get("BgDifTemperature"), 6500)), tc);
+        kelvinToRgb(float(num(q.get("WhiteBalanceTemperature"), 6500)), wb);
+        float lum = 0;
+        for (int c = 0; c < 3; c++) { e.sunColor[c] = col[c] * tc[c] / std::max(1e-3f, wb[c]); }
+        lum = 0.2126f * e.sunColor[0] + 0.7152f * e.sunColor[1] + 0.0722f * e.sunColor[2];
+        for (float& v : e.sunColor) v /= std::max(1e-3f, lum);
+        e.ok = true;
+        if (status)
+            *status = fmt("palette : %s → %s (%d h) ; soleil %s%.1f° / %.0f°, %.0f lux (ciel %.0f), EV %.1f", e.table.c_str(), e.palette.c_str(), hour,
+                          e.forcedSun ? "fixé " : "", double(e.sunEl), double(e.sunAz), double(e.sunLux), double(e.skyLux), double(e.ev));
+        return e;
+    } catch (const std::exception& ex) {
+        if (status) *status = std::string("palette : ") + ex.what();
+        return e;
     }
 }
 

@@ -49,7 +49,7 @@ Mat sampleMat(int m, vec2 w2, vec2 gx, vec2 gy) {
 void main() {
     vec3 n = normalize(cross(dFdx(vW), dFdy(vW)));
     if (n.y < 0.0) n = -n;
-    vec3 L = normalize(vec3(0.35, 1.0, 0.25));
+    vec3 L = sunDir();
     float lit = 0.45 + 0.55 * abs(dot(n, L)), ndl = abs(dot(n, L));
     vec3 col;
     if (pc.scale.w > 0.5) {
@@ -102,6 +102,7 @@ void main() {
     }
     // (sondes de la scène : teinte ambiante autour de la caméra)
     vec3 pa = probeAmbient(n);
-    vec3 litc = pa.x < 0.0 ? vec3(lit) : pc.m[1].a > 0.0 ? ndl * sunTint() + pa : lit * (0.45 * sunTint() + 0.55 * pa);
+    if (pa.x >= 0.0 && gameLight()) { outColor = vec4(gameShade(col, ndl * sunTint() + pa, vec3(0.0)), 1.0); return; }
+    vec3 litc = pa.x < 0.0 ? vec3(lit) : lit * (0.45 * sunTint() + 0.55 * pa);
     outColor = vec4(gameTone(col * litc), 1.0);
 }

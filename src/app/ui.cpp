@@ -901,12 +901,16 @@ void viewport(Editor& ed) {
         ImGui::SetTooltip("Lumière ambiante des sondes de la scène (Bake/Probe) : lumières locales, soleil renvoyé et ciel\n"
                           "(visibilité × luminance du ciel du jeu), harmoniques sphériques d'ordre 1 comme le nuanceur du jeu ;\n"
                           "soleil teinté par l'atmosphère du jeu (Env/GameScene). Pas d'ombres portées dans l'éditeur.\n"
-                          "Clic droit : force de l'ambiance.\n%s\n%s", ed.probesStatus.c_str(), ed.skyStatus.c_str());
+                          "Clic droit : force de l'ambiance, heure.\n%s\n%s\n%s", ed.probesStatus.c_str(), ed.skyStatus.c_str(), ed.envStatus.c_str());
     if (ImGui::BeginPopupContextItem("ambiance")) {
         ImGui::SetNextItemWidth(180);
         ImGui::SliderFloat("Ambiance", &ed.ambBoost, 0.25f, 6.f, "× %.2f", ImGuiSliderFlags_Logarithmic);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("1 = rapport soleil / ambiance du jeu. Plus haut : faces à l'ombre plus claires\n(l'éditeur n'a ni ombres portées ni exposition automatique).");
         if (ImGui::Button("× 1")) ed.ambBoost = 1.f;
+        ImGui::SetNextItemWidth(180);
+        if (ImGui::SliderInt("Heure", &ed.envHour, 0, 23, "%d h")) ed.applyEnv();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Heure de la palette d'environnement du jeu (Pack/EnvPalette.pack) :\ncouleur et force du soleil, exposition, lumière renvoyée.");
+        ImGui::TextDisabled("%s", ed.envStatus.c_str());
         ImGui::EndPopup();
     }
     ImGui::SameLine();
@@ -914,7 +918,16 @@ void viewport(Editor& ed) {
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Courbe de tons du jeu (AglShader « hdr_compose ») : exposition, courbe ACES, gamma 2,2.\n"
                           "Clic droit : régler l'exposition.");
-    if (ImGui::BeginPopupContextItem("expo")) { ImGui::SliderFloat("Exposition", &ed.toneExposure, 0.3f, 4.f); ImGui::EndPopup(); }
+    if (ImGui::BeginPopupContextItem("expo")) {
+        if (ed.env.ok && ed.showProbes && ed.probes.size()) {
+            // (lumière du jeu : l'exposition vient de la palette (ExposureValue) ; on n'en règle que la correction)
+            ImGui::SliderFloat("Correction (IL)", &ed.expoComp, -4.f, 4.f, "%+.1f");
+            ImGui::TextDisabled("palette : EV %.1f, exposition %.3f", double(ed.env.ev), double(ed.env.exposure()));
+        } else {
+            ImGui::SliderFloat("Exposition", &ed.toneExposure, 0.3f, 4.f);
+        }
+        ImGui::EndPopup();
+    }
     ImGui::SameLine();
     ImGui::Checkbox("Sol", &ed.showGround);
     if (ImGui::IsItemHovered())

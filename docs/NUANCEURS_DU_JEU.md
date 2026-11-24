@@ -98,9 +98,9 @@ hmax) + h1) ; couleur et relief mêlés par t.
 
 ## Pas encore appliqué (fichiers manquants)
 
-- Palettes d'environnement (Pack/EnvPalette.pack : direction et force du soleil, exposition, brouillard de base selon
-  l'heure) ; le brouillard volumique (zones lues, valeurs de base manquantes) ; le dessin du ciel (blocs d'en-diffusion
-  du skybin, paramétrage pas encore établi).
+- Le brouillard volumique (palette et zones lues ; unités des densités à établir dans le nuanceur volume_fog) ; le dessin
+  du ciel (blocs d'en-diffusion du skybin, paramétrage pas encore établi) ; mélange entre deux palettes horaires ;
+  ombres portées.
 
 ## Lu mais pas encore appliqué (anciennes notes)
 
@@ -161,6 +161,25 @@ hmax) + h1) ; couleur et relief mêlés par t.
   RayleighScatterRate, MieScatterAnisotropy, Near/FarDensity et leurs fondus, HeightFalloff, HeightYOffset,
   NoiseStrength, UseHeightMap), ShapeType (empreinte de la forme), ShapeGradientWidth.
 - KokiriForest : seulement de la diffusion Rayleigh (0,8), densité qui décroît avec la hauteur (0,5), rien avant 9–10 m.
-- Les valeurs de base viennent d'ailleurs : `Pack/EnvPalette.pack` (WorldMgr/ResEnvPalette, palettes horaires
-  ResEnvPaletteTimeTable dont MainField_Bluesky, ResEnvPaletteAreaUnique ; game__wm__ResEnvPalette_VolumeFog) et
-  game__gfx__VolumeFogCommonParam — pas encore lus.
+- Les valeurs de base sont dans la palette d'environnement (VolumeFogParams1/2, ci-dessous) ; les zones s'y ajoutent.
+
+## Palettes d'environnement (Pack/EnvPalette.pack)
+
+- SARC de BYML : WorldMgr/ResEnvPaletteTimeTable (32), ResEnvPalette (191), ResEnvPaletteAreaUnique (13),
+  ResFixedEnvPalette (26), ResWeatherInfluenceParam (12).
+- Table horaire (ex. KokiriForest) : IsForceMainLight, MainLight_Elevation / _Azimuth (forêt Kokiri : 50,76° et
+  333,36°, soleil fixe), TimeTableArray d'entrées {Hour, Min, EnvPalette, BlendTime, courbe}. Kokiri : Noon dès 5 h 30,
+  Night dès 19 h 30. MainField_Bluesky : soleil calculé selon l'heure (non forcé), 8 palettes de BeforeSunrise à Night.
+- Palette (ex. KokiriForest_Noon) : soleil BgDifColor × température BgDifTemperature (4500 K) × BgDifIntensity (10 000
+  lux ; champ ouvert 110 000) ; SkySunColorIntensity (7 500, intensité du soleil pour le ciel) ; ExposureValue (EV 10 ;
+  champ 14) ; WhiteBalanceTemperature (6 500 K) ; DirectionalLightBounceScale (0,75), SkyLightBounceScale,
+  AmbientIntensity ; HemiLight* ; Bloom* ; SkyRParam_* (amplificateurs Rayleigh 1,2 et Mie 50) ; brouillard
+  VolumeFogParams1/2 (Absorption/Emission/Mie/Rayleigh : couleur et densité, Near/FarDensity et fondus, EHFFalloff et
+  EHFYOffset pour la hauteur, MieAnisotropy, NoiseStrength) et VolumeFogProbeSkyLightScale (6).
+- Unités vérifiées par l'exposition : unité / (π · 1,2 · 2^EV) donne 2,59 pour Kokiri et 1,78 pour le champ : même ordre,
+  l'éclairement du soleil est bien en lux et l'exposition photographique (EV100).
+- Dans l'éditeur (case « Sondes ») : palette de la scène à l'heure choisie (clic droit, 12 h par défaut ; table du
+  nom de la scène, sinon MainField_Bluesky) ; soleil = couleur de la palette, direction forcée sinon celle de
+  l'éditeur ; ambiance = lumières locales + renvoi × DirectionalLightBounceScale + ciel × (SkySunColorIntensity /
+  BgDifIntensity) × SkyLightBounceScale ; couleur = ACES(albédo linéaire × éclairement × exposition), avec une
+  correction en IL (clic droit sur « Tons du jeu »). Convention d'azimut supposée : depuis +Z vers +X.

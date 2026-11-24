@@ -98,6 +98,7 @@ public:
     bool hasMap = false;
     std::string mapError;
     void openMap(const std::string& rel);
+    std::string scenePrefix() const;
     void reloadMap();
     bool save();
     void revertMap();
@@ -194,6 +195,12 @@ public:
     float ambBoost = 1.f;        // (force de l'ambiance des sondes : 1 = rapport soleil / ambiance du jeu)
     SkyEnv sky;                  // (tables d'atmosphère du jeu : couleur du soleil et du ciel)
     std::string skyStatus;
+    EnvPalette env;              // (palette d'environnement de la scène à l'heure choisie)
+    std::string envStatus;
+    int envHour = 12;
+    float expoComp = 0.f;        // (correction d'exposition, en IL, par rapport à celle de la palette)
+    float sunDir[3] = {0.32152f, 0.91863f, 0.22966f};
+    void applyEnv();             // (relit la palette et met à jour soleil, ciel et échelles des sondes)
     std::unordered_map<const void*, std::array<float, 15>> probeCache;   // (position, puis a + M·n)
     bool gameTone = false;       // (courbe de tons du jeu : ACES et gamma 2,2, AglShader « hdr_compose »)
     float toneExposure = 1.4f;   // (cartes de normales et rugosité des matériaux, comme le nuanceur du jeu)

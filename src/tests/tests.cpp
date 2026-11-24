@@ -111,6 +111,12 @@ int main(int argc, char** argv) {
                 e.at(std::sin(deg / 57.29578f), sun, sky);
                 std::printf("  %5.1f°  soleil %.3f %.3f %.3f   ciel %.4f %.4f %.4f\n", deg, sun[0], sun[1], sun[2], sky[0], sky[1], sky[2]);
             }
+        } else if (cmd == "palette") {   // romfs préfixe-de-scène [heure] -> palette d'environnement retenue
+            Game g(u8path(argv[2]));
+            std::string st;
+            EnvPalette e = envLoad(g, argv[3], argc > 4 ? std::atoi(argv[4]) : 12, &st);
+            std::printf("%s\ncouleur du soleil %.3f %.3f %.3f ; exposition %.3f ; renvoi %.2f, ciel %.2f, ambiance %.2f\n", st.c_str(),
+                        e.sunColor[0], e.sunColor[1], e.sunColor[2], e.exposure(), e.bounceScale, e.skyBounceScale, e.ambientIntensity);
         } else if (cmd == "foliage") {   // romfs préfixe-de-scène -> feuillage lu
             Game g(u8path(argv[2]));
             std::string st;

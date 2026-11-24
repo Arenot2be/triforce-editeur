@@ -124,7 +124,7 @@ void main() {
             if ((flags & 256) != 0) { vec4 r2 = texture(uRah2, vUv2); rough = mix(rough, r2.r, layerK); ao = mix(ao, r2.g, layerK); }
         }
     }
-    vec3 L = normalize(vec3(0.35, 1.0, 0.25));
+    vec3 L = sunDir();
     float lit = hasN ? 0.4 + 0.45 * max(dot(n, L), 0.0) + 0.15 * (0.5 + 0.5 * n.y) + 0.06 * abs(n.x)
                      : 0.42 + 0.5 * abs(dot(n, L)) + 0.08 * abs(n.x);
     // (éclairage précalculé des sommets quand le modèle en a : il remplace en partie l'éclairage simple de l'éditeur)
@@ -134,7 +134,7 @@ void main() {
     vec3 pa = probeAmbient(n);
     vec3 litc = vec3(lit);
     if (pa.x >= 0.0) {
-        if (pc.m[1].a > 0.0) {
+        if (gameLight()) {
             // (ciel du jeu connu : éclairements dans les unités du jeu, soleil = 1 — soleil × N·L + sondes, comme la
             //  passe d'éclairage du nuanceur « model », sans les ombres)
             float ndl = hasN ? max(dot(n, L), 0.0) : abs(dot(n, L));
@@ -145,12 +145,15 @@ void main() {
         }
     }
     litc *= mix(1.0, ao, 0.6);
-    vec3 col = c.rgb * mix(litc, litc * baked * 1.15, 0.7);
+    vec3 lightc = mix(litc, litc * baked * 1.15, 0.7);
+    vec3 col = c.rgb * lightc;
     // (reflet du soleil selon la rugosité, discret : l'éditeur n'a pas l'éclairage du jeu)
     vec3 V = normalize(vEye - vW), H = normalize(L + V);
     float sm = (1.0 - rough) * (1.0 - rough);
     float spec = (flags & 64) != 0 ? sm * pow(max(dot(n, H), 0.0), mix(6.0, 96.0, sm)) * 0.35 : 0.0;
     col += sunTint() * spec;
+    bool phys = gameLight() && pa.x >= 0.0 && !lm;
+    if (phys) col = gameShade(c.rgb, lightc, sunTint() * spec * 0.25);
     if (lm) {
         // (carte du jeu, deux canaux : r = lumière du ciel reçue (occlusion ambiante), g = soleil reçu (ombres portées))
         vec2 B = texture(uLight, vBake * pc.color.zw + pc.color.xy).rg;
@@ -159,5 +162,5 @@ void main() {
         col = c.rgb * (0.03 + sky * B.r * 0.8 + sun * B.g * mix(0.45, 1.0, ndl));
     }
     if (pc.pos.w > 0.5) col = mix(col, vec3(1.0, 0.82, 0.3), pc.pos.w > 1.5 ? 0.18 : 0.38);
-    outColor = vec4(gameTone(col), alpha);
+    outColor = vec4(phys ? col : gameTone(col), alpha);
 }

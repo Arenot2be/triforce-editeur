@@ -5,6 +5,7 @@
 // de sorte. Les couches de couverture du sol (Moss, Turf, Stone, Undergrowth…) sont des grilles de cases générées
 // par le moteur : pas encore lues.
 #pragma once
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -75,7 +76,8 @@ struct ProbeSet {
     // (éclairement ambiant autour d'un point, sous forme linéaire a + M·n, rapporté à l'éclairement médian vers le
     //  haut : out = (a.r, a.g, a.b, M.b.x, M.r.x, M.r.y, M.r.z, M.b.y, M.g.x, M.g.y, M.g.z, M.b.z) ; false sans sonde)
     bool ambient(const float p[3], float out[12]) const;
-    float sky[3] = {0.045f, 0.06f, 0.085f};   // (luminance du ciel supposée, en attendant Env/GameScene)
+    float sky[3] = {0.045f, 0.06f, 0.085f};
+    float scaleA = 1, scaleB = 1, scaleSky = 1;   // (lumières locales, soleil renvoyé, ciel : échelles de la palette)   // (luminance du ciel supposée, en attendant Env/GameScene)
     float ref = 1;                            // (éclairement médian vers le haut ; 1 en unités absolues)
     bool absolute = false;
     float median = 0;                    // (ciel du jeu connu : éclairements en unités où le soleil vaut 1)
@@ -96,6 +98,24 @@ struct SkyEnv {
     void at(float mu, float sun[3], float sky[3]) const;
 };
 SkyEnv skyParse(const Bytes& skybin);
+
+// Palette d'environnement du jeu (Pack/EnvPalette.pack → WorldMgr/ResEnvPaletteTimeTable puis ResEnvPalette) pour une
+// heure donnée : soleil (direction forcée par la scène, couleur par température, éclairement en lux), exposition (EV),
+// échelles de la lumière renvoyée.
+struct EnvPalette {
+    bool ok = false;
+    std::string table, palette;          // (noms retenus)
+    bool forcedSun = false;
+    float sunEl = 0, sunAz = 0;          // (degrés)
+    float sunColor[3] = {1, 1, 1};       // (linéaire, luminance 1, après la balance des blancs du jeu)
+    float sunLux = 1e4f, skyLux = 1e4f, ev = 10;   // (BgDifIntensity, SkySunColorIntensity, ExposureValue)
+    float unit() const { return sunLux > 1.f ? sunLux : std::max(skyLux, 1.f); }   // (lux d'une unité d'éclairement de l'éditeur)
+    float bounceScale = 1, skyBounceScale = 1, ambientIntensity = 1;
+    // (exposition du jeu : unité (lux) / (π · 1,2 · 2^EV), pour des éclairements comptés en unités)
+    float exposure() const;
+};
+EnvPalette envLoad(Game& g, const std::string& scenePrefix, int hour, std::string* status);
+void kelvinToRgb(float kelvin, float out[3]);   // (linéaire sRGB, Y = 1)
 SkyEnv skyLoad(Game& g, std::string* status);
 
 FoliageSet foliageParse(const Bytes& flnt, const std::string& layer);   // (Error si ce n'est pas un fichier d'instances)
