@@ -182,6 +182,9 @@ void Editor::openMap(const std::string& rel) {
         foliageStatus = "feuillage : lecture…";
         ground.clear();
         lights.clear();
+        probes = ProbeSet{};
+        probeCache.clear();
+        probesStatus = "sondes : lecture…";
         groundStatus = "couverture du sol : lecture…";
         lightsStatus = "lumières de la scène : lecture…";
         {
@@ -190,11 +193,16 @@ void Editor::openMap(const std::string& rel) {
             jobs.add(1, [this, g, pre, forMap]() -> std::function<void()> {
                 auto gl = std::make_shared<std::vector<GroundLayer>>();
                 auto li = std::make_shared<std::vector<SceneLight>>();
-                auto st = std::make_shared<std::string>(), sl = std::make_shared<std::string>();
+                auto st = std::make_shared<std::string>(), sl = std::make_shared<std::string>(), sp = std::make_shared<std::string>();
+                auto pr = std::make_shared<ProbeSet>();
+                try { *pr = probesLoad(*g, pre, sp.get()); } catch (const std::exception& e) { *sp = std::string("sondes : ") + e.what(); }
                 try { *gl = groundLoad(*g, pre, st.get()); } catch (const std::exception& e) { *st = std::string("couverture du sol : ") + e.what(); }
                 try { *li = lightsLoad(*g, pre, sl.get()); } catch (const std::exception& e) { *sl = std::string("lumières de la scène : ") + e.what(); }
-                return [this, gl, li, st, sl, forMap] {
+                return [this, gl, li, st, sl, pr, sp, forMap] {
                     if (doc.path != forMap) return;
+                    probes = std::move(*pr);
+                    probesStatus = *sp;
+                    probeCache.clear();
                     ground = std::move(*gl);
                     lights = std::move(*li);
                     groundStatus = *st;
@@ -621,6 +629,19 @@ void Editor::render(VkCommandBuffer c) {
     vkCmdSetScissor(c, 0, 1, &sc);
     PC base{};
     base.m[2][3] = gameTone ? toneExposure : 0.f;   // (courbe de tons du jeu : hdr_compose d'AglShader)
+    // (sondes : l'ambiance autour du point visé pour le sol ; chaque objet a la sienne, plus bas)
+    auto probeAt = [&](const void* key, V3 p, PC& out) {
+        if (!showProbes || probes.size() == 0) return;
+        auto& e = probeCache[key];
+        if (e[12] != float(p.x) || e[13] != float(p.y) || e[14] != float(p.z) || e[0] == 0) {
+            float q[3] = {float(p.x), float(p.y), float(p.z)}, o[12];
+            if (!probes.ambient(q, o)) { probeCache.erase(key); return; }
+            for (int i = 0; i < 12; i++) e[size_t(i)] = o[i];
+            e[12] = q[0]; e[13] = q[1]; e[14] = q[2];
+        }
+        for (int i = 0; i < 12; i++) out.amb[i / 4][i % 4] = e[size_t(i)];
+    };
+    probeAt(&probes, cam.target, base);   // (le point visé : au sol, plus juste que la caméra en hauteur)
     std::memcpy(base.vp, vp.m, 64);
     base.scale[0] = base.scale[1] = base.scale[2] = 1;
     if (showTerrain) rend.drawTerrain(c, base);
@@ -670,6 +691,8 @@ void Editor::render(VkCommandBuffer c) {
                 V3 p = posOf(*r), ro = rotOf(*r), s = scaleOf(*r);
                 std::string name = nameOf(r->value);
                 PC pc = base;
+                std::memset(pc.amb, 0, sizeof pc.amb);
+                probeAt(r.get(), p, pc);
                 pc.pos[0] = float(p.x); pc.pos[1] = float(p.y); pc.pos[2] = float(p.z);
                 pc.pos[3] = sel.count(r.get()) ? 1.f : hover == r.get() ? 2.f : 0.f;
                 pc.rot[0] = float(ro.x); pc.rot[1] = float(ro.y); pc.rot[2] = float(ro.z);

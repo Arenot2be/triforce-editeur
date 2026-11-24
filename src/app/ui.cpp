@@ -896,6 +896,11 @@ void viewport(Editor& ed) {
                           "carte de normales (décodée comme le jeu), rugosité, occlusion, et les falaises à deux couches\n"
                           "(roche et mousse fondues selon la pente et les hauteurs)");
     ImGui::SameLine();
+    ImGui::Checkbox("Sondes", &ed.showProbes);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Teinte ambiante des sondes de lumière de la scène (Bake/Probe) : lumière renvoyée et visibilité du ciel,\n"
+                          "harmoniques sphériques d'ordre 1, comme le nuanceur du jeu.\n%s", ed.probesStatus.c_str());
+    ImGui::SameLine();
     ImGui::Checkbox("Tons du jeu", &ed.gameTone);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Courbe de tons du jeu (AglShader « hdr_compose ») : exposition, courbe ACES, gamma 2,2.\n"

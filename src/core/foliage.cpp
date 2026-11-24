@@ -295,4 +295,114 @@ std::vector<SceneLight> lightsLoad(Game& g, const std::string& pre, std::string*
     return v;
 }
 
+// ---- sondes de lumière ----
+namespace {
+uint64_t cellKey(int x, int y, int z) { return (uint64_t(uint32_t(x + 100000)) << 42) ^ (uint64_t(uint32_t(y + 100000)) << 21) ^ uint64_t(uint32_t(z + 100000)); }
+float half2f(uint16_t h) {
+    uint32_t s = (h >> 15) & 1, e = (h >> 10) & 31, m = h & 1023;
+    float v = e == 0 ? std::ldexp(float(m), -24) : e == 31 ? 65504.f : std::ldexp(float(m | 1024), int(e) - 25);
+    return s ? -v : v;
+}
+}  // namespace
+
+ProbeSet probesParse(const std::vector<Bytes>& files) {
+    ProbeSet ps;
+    for (auto& d : files) {
+        if (d.size() < 0x80) continue;
+        // (début des sondes : après 4³, 8³, 16³ ou 32³ cellules ; on vérifie que le nombre lu tombe juste)
+        size_t start = 0;
+        for (size_t hdr : {size_t(0x10), size_t(0x20)})
+            for (size_t n : {4, 8, 16, 32}) {
+                size_t st = hdr + 48 * n * n * n + 0x24;
+                if (st > d.size() || st < 0x1c) continue;
+                uint32_t cnt = rd32(d, st - 0x1c);
+                if (st + size_t(cnt) * 72 == d.size() && cnt > 0) start = st;
+            }
+        if (!start) continue;
+        size_t cnt = (d.size() - start) / 72;
+        for (size_t k = 0; k < cnt; k++) {
+            size_t o = start + 72 * k;
+            float p[3];
+            for (int i = 0; i < 3; i++) p[i] = rdf(d, o + 4 * size_t(i));
+            if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) continue;
+            ps.pos.insert(ps.pos.end(), p, p + 3);
+            for (int i = 0; i < 28; i++) ps.sh.push_back(half2f(uint16_t(d[o + 16 + 2 * size_t(i)] | d[o + 17 + 2 * size_t(i)] << 8)));
+        }
+    }
+    ps.index();
+    return ps;
+}
+
+void ProbeSet::index() {
+    grid.clear();
+    for (size_t k = 0; k < size(); k++)
+        grid[cellKey(int(std::floor(pos[3 * k] / 4)), int(std::floor(pos[3 * k + 1] / 4)), int(std::floor(pos[3 * k + 2] / 4)))].push_back(uint32_t(k));
+    // (référence : éclairement médian vers le haut)
+    std::vector<float> up;
+    for (size_t k = 0; k < size(); k += 7) {
+        const float* h = &sh[28 * k];
+        float r = 0.886f * (h[0] + h[16] + sky[0] * h[3]) + 1.023f * (h[4] + h[19] + sky[0] * h[7]);
+        float g = 0.886f * (h[1] + h[17] + sky[1] * h[3]) + 1.023f * (h[5] + h[20] + sky[1] * h[7]);
+        float b = 0.886f * (h[2] + h[18] + sky[2] * h[3]) + 1.023f * (h[6] + h[21] + sky[2] * h[7]);
+        up.push_back(0.2126f * r + 0.7152f * g + 0.0722f * b);
+    }
+    if (!up.empty()) {
+        std::nth_element(up.begin(), up.begin() + long(up.size() / 2), up.end());
+        ref = std::max(1e-4f, up[up.size() / 2]);
+    }
+}
+
+bool ProbeSet::ambient(const float p[3], float out[12]) const {
+    if (grid.empty()) return false;
+    int cx = int(std::floor(p[0] / 4)), cy = int(std::floor(p[1] / 4)), cz = int(std::floor(p[2] / 4));
+    // (les sondes des cases voisines, pondérées par l'inverse du carré de la distance)
+    double acc[28] = {}, wsum = 0;
+    for (int r = 1; r <= 4 && wsum == 0; r++)
+        for (int x = cx - r; x <= cx + r; x++)
+            for (int y = cy - r; y <= cy + r; y++)
+                for (int z = cz - r; z <= cz + r; z++) {
+                    auto it = grid.find(cellKey(x, y, z));
+                    if (it == grid.end()) continue;
+                    for (uint32_t k : it->second) {
+                        double dx = pos[3 * k] - p[0], dy = pos[3 * k + 1] - p[1], dz = pos[3 * k + 2] - p[2];
+                        double w = 1.0 / (dx * dx + dy * dy + dz * dz + 1.0);
+                        wsum += w;
+                        for (int i = 0; i < 28; i++) acc[i] += w * sh[28 * size_t(k) + size_t(i)];
+                    }
+                }
+    if (wsum == 0) return false;
+    for (double& v : acc) v /= wsum;
+    // (E(n) = 0,886·L0 + 1,023·(L1·n) pour A, B et le ciel × visibilité ; ordre des coefficients : Y00, y, z, x)
+    float a[3], M[3][3];
+    for (int c = 0; c < 3; c++) {
+        double s = sky[c];
+        a[c] = float(0.886 * (acc[c] + acc[16 + c] + s * acc[3]) / ref);
+        double ly = acc[4 + c] + acc[19 + c] + s * acc[7], lz = acc[8 + c] + acc[22 + c] + s * acc[11], lx = acc[12 + c] + acc[25 + c] + s * acc[15];
+        M[c][0] = float(1.023 * lx / ref); M[c][1] = float(1.023 * ly / ref); M[c][2] = float(1.023 * lz / ref);
+    }
+    float o[12] = {a[0], a[1], a[2], M[2][0], M[0][0], M[0][1], M[0][2], M[2][1], M[1][0], M[1][1], M[1][2], M[2][2]};
+    for (int i = 0; i < 12; i++) out[i] = std::isfinite(o[i]) ? o[i] : 0.f;
+    return true;
+}
+
+ProbeSet probesLoad(Game& g, const std::string& pre, std::string* status) {
+    std::vector<Bytes> files;
+    std::string dir = "Bake/Probe/Scene/" + pre + "/";
+    int n = 0;
+    for (auto& f : g.allFiles()) {
+        if (f.rfind(dir, 0) != 0) continue;
+        // (niveaux 1 et 2 et « resident » : assez fins, sans le poids du niveau 0)
+        bool lvl = f.find("_1.bkprb") != std::string::npos || f.find("_2.bkprb") != std::string::npos || f.find("resident.bkprcb") != std::string::npos;
+        if (!lvl) continue;
+        try { files.push_back(g.read(f)); n++; } catch (...) {}
+    }
+    if (files.empty()) {
+        if (status) *status = "sondes : pas de " + dir;
+        return {};
+    }
+    ProbeSet ps = probesParse(files);
+    if (status) *status = fmt("sondes : %zu (%d fichiers)", ps.size(), n);
+    return ps;
+}
+
 }  // namespace te

@@ -113,3 +113,15 @@ hmax) + h1) ; couleur et relief mêlés par t.
   reporté dans `terrain.frag` (qui mélange déjà 4 matières par la hauteur).
 - `SceneMaterial` (1 modèle), `AglShader.sharcb` (éclairage
   différé, ciel, brouillard) et `FoliageShader.sharcb` (préparation du feuillage) : métadonnées lues, code pas encore suivi.
+
+## Sondes de lumière (Bake/Probe/Scene/<préfixe>/)
+
+- `meta.bkprmb` : origine de la grille (ex. −208, 98, −126 pour la forêt Kokiri), blocs de 64 m.
+- Fichiers de blocs `X?_Y?_Z?_<niveau>.bkprb` (niveaux 0, 1, 2 : 32³, 16³, 8³ cellules de 48 octets) et `resident.bkprcb` (4³, en-tête 0x20).
+  Les enregistrements suivent les cellules : début = en-tête + 48·N³ + 0x24, nombre (u32) à début − 0x1C.
+- Enregistrement de 72 octets : position (3 floats), u32, puis 28 demi-flottants :
+  - h0..h15 : lumière renvoyée RVB en harmoniques d'ordre 1 (Y00, y, z, x), avec la visibilité du ciel en h3, h7, h11, h15 ;
+  - h16..h27 : second jeu RVB (B).
+- Éclairement : E = 0.886·L0 + 1.023·L1·n. Le ciel est pris constant (0.045, 0.06, 0.085) en attendant `Env/GameScene.*.genvb`.
+- Dans l'éditeur : chaque objet reçoit l'ambiance des sondes voisines (pondération par l'inverse de la distance), normalisée
+  par la luminance médiane ; le sol prend celle du point visé. Case « Sondes ».

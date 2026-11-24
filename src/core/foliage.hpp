@@ -6,6 +6,7 @@
 // par le moteur : pas encore lues.
 #pragma once
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "core/game.hpp"
@@ -60,6 +61,26 @@ struct SceneLight {
 };
 std::vector<SceneLight> lightsParse(const Bytes& bklight);
 std::vector<SceneLight> lightsLoad(Game& g, const std::string& scenePrefix, std::string* status);
+
+// Sondes de lumière (Bake/Probe/Scene/<scène>/) : meta.bkprmb (origine, taille des blocs), resident.bkprcb (niveau le
+// plus grossier, 4³ cellules) et X*_Y*_Z*_<niveau>.bkprb (niveaux 0 à 2 : 32³, 16³, 8³ cellules de 48 octets).
+// Après les cellules : u32 4, u32 nombre, 24 octets nuls, puis 72 octets par sonde : position (3 flottants), u32,
+// 28 demi-flottants = trois jeux d'harmoniques sphériques d'ordre 1 (Y00, Y1y, Y1z, Y1x) : lumière A (RVB des
+// groupes 0-3), visibilité du ciel (le 4e de ces groupes), lumière B (RVB, demi-flottants 16 à 27).
+struct ProbeSet {
+    std::vector<float> pos;   // (x, y, z par sonde)
+    std::vector<float> sh;    // (28 par sonde)
+    size_t size() const { return pos.size() / 3; }
+    // (éclairement ambiant autour d'un point, sous forme linéaire a + M·n, rapporté à l'éclairement médian vers le
+    //  haut : out = (a.r, a.g, a.b, M.b.x, M.r.x, M.r.y, M.r.z, M.b.y, M.g.x, M.g.y, M.g.z, M.b.z) ; false sans sonde)
+    bool ambient(const float p[3], float out[12]) const;
+    float sky[3] = {0.045f, 0.06f, 0.085f};   // (luminance du ciel supposée, en attendant Env/GameScene)
+    float ref = 1;                            // (éclairement médian vers le haut)
+    std::unordered_map<uint64_t, std::vector<uint32_t>> grid;   // (cases de 4 m)
+    void index();
+};
+ProbeSet probesParse(const std::vector<Bytes>& files);
+ProbeSet probesLoad(Game& g, const std::string& scenePrefix, std::string* status);
 
 FoliageSet foliageParse(const Bytes& flnt, const std::string& layer);   // (Error si ce n'est pas un fichier d'instances)
 FoliageSet foliageLoad(Game& g, const std::string& scenePrefix, std::string* status);

@@ -129,8 +129,16 @@ void main() {
                      : 0.42 + 0.5 * abs(dot(n, L)) + 0.08 * abs(n.x);
     // (éclairage précalculé des sommets quand le modèle en a : il remplace en partie l'éclairage simple de l'éditeur)
     float baked = clamp(vCol.r, 0.0, 2.5);
-    lit *= mix(1.0, ao, 0.6);
-    vec3 col = c.rgb * mix(lit, lit * baked * 1.15, 0.7);
+    // (avec les sondes de la scène : la part ambiante (0,4 + ciel) prend leur couleur et leur direction, comme le
+    //  nuanceur du jeu qui ajoute au soleil l'éclairement des sondes)
+    vec3 pa = probeAmbient(n);
+    vec3 litc = vec3(lit);
+    if (pa.x >= 0.0) {
+        float sun = hasN ? 0.45 * max(dot(n, L), 0.0) : 0.5 * abs(dot(n, L));
+        litc = sun * vec3(1.0, 0.97, 0.9) + 0.55 * pa;
+    }
+    litc *= mix(1.0, ao, 0.6);
+    vec3 col = c.rgb * mix(litc, litc * baked * 1.15, 0.7);
     // (reflet du soleil selon la rugosité, discret : l'éditeur n'a pas l'éclairage du jeu)
     vec3 V = normalize(vEye - vW), H = normalize(L + V);
     float sm = (1.0 - rough) * (1.0 - rough);

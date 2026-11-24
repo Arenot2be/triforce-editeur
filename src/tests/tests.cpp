@@ -85,6 +85,17 @@ int main(int argc, char** argv) {
                 for (auto& bm : e.mats) std::printf(" [%s %d %.3f %.3f %.4f %.4f]", bm.material.c_str(), bm.index, bm.off[0], bm.off[1], bm.scale[0], bm.scale[1]);
                 std::printf("\n");
             }
+        } else if (cmd == "probes") {   // fichiers de sondes -> éclairement ambiant en quelques points
+            std::vector<Bytes> fs;
+            for (int i = 2; i < argc; i++) fs.push_back(readFile(u8path(argv[i])));
+            ProbeSet ps = probesParse(fs);
+            std::printf("%zu sondes, référence %.4f\n", ps.size(), ps.ref);
+            for (size_t k = 0; k < ps.size(); k += std::max<size_t>(1, ps.size() / 10)) {
+                float o[12];
+                if (!ps.ambient(&ps.pos[3 * k], o)) continue;
+                std::printf("  (%.0f %.0f %.0f) haut %.2f %.2f %.2f  bas %.2f %.2f %.2f\n", ps.pos[3 * k], ps.pos[3 * k + 1], ps.pos[3 * k + 2],
+                            o[0] + o[5], o[1] + o[9], o[2] + o[7], o[0] - o[5], o[1] - o[9], o[2] - o[7]);
+            }
         } else if (cmd == "foliage") {   // romfs préfixe-de-scène -> feuillage lu
             Game g(u8path(argv[2]));
             std::string st;

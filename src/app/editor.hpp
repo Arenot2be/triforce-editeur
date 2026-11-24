@@ -188,6 +188,10 @@ public:
     std::string groundStatus, lightsStatus;
     std::vector<SceneLight> lights;
     bool showRelief = true;
+    bool showProbes = true;      // (teinte ambiante des sondes de lumière de la scène, Bake/Probe)
+    ProbeSet probes;
+    std::string probesStatus;
+    std::unordered_map<const void*, std::array<float, 15>> probeCache;   // (position, puis a + M·n)
     bool gameTone = false;       // (courbe de tons du jeu : ACES et gamma 2,2, AglShader « hdr_compose »)
     float toneExposure = 1.4f;   // (cartes de normales et rugosité des matériaux, comme le nuanceur du jeu)
     bool showGround = true, showLights = true;

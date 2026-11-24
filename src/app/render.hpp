@@ -17,8 +17,10 @@ struct PC {
     float color[4];
     // (recettes de mélange des matériaux du jeu : couleurs A, B, masque (a de m[0] : recette) ; scalaires du matériau)
     float m[5][4];
+    // (éclairement ambiant des sondes de la scène autour de l'objet : a + M·n, voir ProbeSet::ambient ; nul = sans)
+    float amb[3][4];
 };
-static_assert(sizeof(PC) == 208, "constantes de 208 octets");
+static_assert(sizeof(PC) == 256, "constantes de 256 octets");
 
 struct GpuMesh {
     VkBuf vb, ib;

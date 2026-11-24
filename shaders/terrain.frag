@@ -99,5 +99,8 @@ void main() {
         float steep = smoothstep(0.55, 0.8, 1.0 - abs(n.y));   // (pentes fortes : roche)
         col = mix(vCol.rgb, vec3(0.42, 0.41, 0.38), steep);
     }
-    outColor = vec4(gameTone(col * lit), 1.0);
+    // (sondes de la scène : teinte ambiante autour de la caméra)
+    vec3 pa = probeAmbient(n);
+    vec3 litc = pa.x >= 0.0 ? lit * (0.45 + 0.55 * pa) : vec3(lit);
+    outColor = vec4(gameTone(col * litc), 1.0);
 }
