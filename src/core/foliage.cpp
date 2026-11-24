@@ -674,4 +674,129 @@ EnvPalette envLoad(Game& g, const std::string& pre, int minutes, std::string* st
     }
 }
 
+// ---- réglages AGL ----
+AglParams aglLoad(Game& g, const std::string& pre, std::string* status) {
+    AglParams a;
+    // (où qu'ils soient rangés : on les cherche par leur nom, .bgyml ou .bgyml.zs)
+    auto find = [&](const std::string& tail) -> std::string {
+        for (auto& f : g.allFiles())
+            if (endsWith(f, tail) || endsWith(f, tail + ".zs")) return f;
+        return "";
+    };
+    auto load = [&](const std::string& f) -> std::unique_ptr<Document> {
+        try { return std::make_unique<Document>(bymlLoad(g.read(f))); } catch (...) { return nullptr; }
+    };
+    std::string sf = find("/SkyParam/MainField.agl__SkyParam.bgyml");
+    if (auto d = sf.empty() ? nullptr : load(sf)) {
+        const Value& q = d->root;
+        if (const Value* c = q.get("StaticRayleighScatteringCoeff"); c && c->isMap()) {
+            a.betaR[0] = float(vnum(c->get("X"), a.betaR[0]));
+            a.betaR[1] = float(vnum(c->get("Y"), a.betaR[1]));
+            a.betaR[2] = float(vnum(c->get("Z"), a.betaR[2]));
+        }
+        a.HR = float(vnum(q.get("StaticRayleighBaseHeight"), 5));
+        a.betaM = float(vnum(q.get("StaticMieScatteringCoeff"), 0.0018));
+        a.HM = float(vnum(q.get("StaticMieBaseHeight"), 1));
+        a.g = float(vnum(q.get("StaticMieSymmetricalProp"), 0.8));
+        a.rayAmp = float(vnum(q.get("RayleighAmplifierRendering"), 1));
+        a.mieAmp = float(vnum(q.get("MieAmplifierRendering"), 1));
+        a.gRender = float(vnum(q.get("MieSymmetricalPropRendering"), a.g));
+        a.Rg = float(vnum(q.get("RadiusGround"), 6360));
+        a.Rt = float(vnum(q.get("RadiusAtmosphere"), 6420));
+        a.sunIntensity = float(vnum(q.get("RenderSunIntensity"), 100));
+        a.sunSize = float(vnum(q.get("RenderSunSize"), 1));
+        vcol(q.get("GroundColor"), a.ground, false);
+        a.skyOk = a.Rt > a.Rg && a.HR > 0 && a.HM > 0;
+        a.skyFile = sf;
+    }
+    // (ombres : réglage de la scène (nom, puis sans ses suffixes), sinon MainField ; « $parent » suivi)
+    std::string n = pre, shf;
+    while (!n.empty() && (shf = find("/ShadowPrePassParam/" + n + ".agl__ShadowPrePassParam.bgyml")).empty()) {
+        size_t k = n.find_last_of('_');
+        if (k == std::string::npos) n.clear(); else n.resize(k);
+    }
+    if (shf.empty()) shf = find("/ShadowPrePassParam/MainField.agl__ShadowPrePassParam.bgyml");
+    for (int depth = 0; depth < 4 && !shf.empty(); depth++) {
+        auto d = load(shf);
+        if (!d) break;
+        const Value& q = d->root;
+        if (a.shadowFile.empty()) a.shadowFile = shf;
+        if (const Value* v = q.get("DynamicShadowFarFadeStart"); v && v->isNum() && !a.shadowOk) {
+            a.shadowFadeStart = float(v->num());
+            a.shadowFadeEnd = float(vnum(q.get("DynamicShadowFarFadeEnd"), 200));
+            a.shadowOk = true;
+        }
+        const Value* par = q.get("$parent");
+        if (a.shadowOk || !par || par->t != T::String) break;
+        // (« Work/agl/ShadowPrePassParam/MainField.agl__ShadowPrePassParam.gyml » → son nom)
+        std::string pn = par->s;
+        size_t sl = pn.find_last_of('/'), dt = pn.find(".agl__");
+        if (sl == std::string::npos || dt == std::string::npos) break;
+        shf = find("/ShadowPrePassParam/" + pn.substr(sl + 1, dt - sl - 1) + ".agl__ShadowPrePassParam.bgyml");
+    }
+    if (status)
+        *status = std::string(a.skyOk ? "ciel : SkyParam/MainField lu" : "ciel : SkyParam absent (valeurs par défaut)") +
+                  (a.shadowOk ? fmt(" ; ombres : fondu de %.0f à %.0f m", double(a.shadowFadeStart), double(a.shadowFadeEnd)) : " ; ombres : réglage absent");
+    return a;
+}
+
+// ---- diffusion simple du ciel (même calcul que shaders/sky.frag) ----
+namespace {
+float rayExit(const double o[3], const float d[3], double R) {
+    double b = o[0] * d[0] + o[1] * d[1] + o[2] * d[2], c = o[0] * o[0] + o[1] * o[1] + o[2] * o[2] - R * R, h = b * b - c;
+    return h < 0 ? -1.f : float(-b + std::sqrt(h));
+}
+}  // namespace
+
+void skySingle(const AglParams& a, const float s[3], const float d[3], float altKm, float mieAmp, float gM, float out[3]) {
+    double o[3] = {0, a.Rg + std::max(0.001f, altKm), 0};
+    float t = rayExit(o, d, a.Rt);
+    out[0] = out[1] = out[2] = 0;
+    if (t <= 0) return;
+    if (d[1] < 0) {   // (vers le sol : on s'arrête au sol)
+        float tg;
+        double b = o[1] * d[1], c = o[1] * o[1] - double(a.Rg) * a.Rg, h = b * b - c;
+        if (h >= 0 && (tg = float(-b - std::sqrt(h))) > 0) t = std::min(t, tg);
+    }
+    float c = s[0] * d[0] + s[1] * d[1] + s[2] * d[2];
+    float pR = 0.0596831f * (1 + c * c), pM = 0.0795775f * (1 - gM * gM) / std::pow(std::max(1 + gM * gM - 2 * gM * c, 1e-4f), 1.5f);
+    const int N = 24, M = 8;
+    float ds = t / N, tv[3] = {0, 0, 0};
+    for (int i = 0; i < N; i++) {
+        double q[3] = {o[0] + d[0] * (i + 0.5) * ds, o[1] + d[1] * (i + 0.5) * ds, o[2] + d[2] * (i + 0.5) * ds};
+        float h = float(std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]) - a.Rg);
+        if (h < 0) break;
+        float dR = std::exp(-h / a.HR), dM = std::exp(-h / a.HM);
+        for (int k = 0; k < 3; k++) tv[k] += (a.betaR[k] * dR + a.betaM * 1.11f * dM) * ds * 0.5f;
+        // (vers le soleil)
+        float ts = rayExit(q, s, a.Rt), ls[3] = {0, 0, 0};
+        bool blocked = false;
+        float dl = ts / M;
+        for (int j = 0; j < M && ts > 0; j++) {
+            double r[3] = {q[0] + s[0] * (j + 0.5) * dl, q[1] + s[1] * (j + 0.5) * dl, q[2] + s[2] * (j + 0.5) * dl};
+            float hh = float(std::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]) - a.Rg);
+            if (hh < 0) { blocked = true; break; }
+            for (int k = 0; k < 3; k++) ls[k] += (a.betaR[k] * std::exp(-hh / a.HR) + a.betaM * 1.11f * std::exp(-hh / a.HM)) * dl;
+        }
+        if (!blocked)
+            for (int k = 0; k < 3; k++) out[k] += std::exp(-(tv[k] + ls[k])) * (a.betaR[k] * dR * pR + a.betaM * mieAmp * dM * pM) * ds;
+        for (int k = 0; k < 3; k++) tv[k] += (a.betaR[k] * dR + a.betaM * 1.11f * dM) * ds * 0.5f;
+    }
+}
+
+void skySingleIrradiance(const AglParams& a, const float s[3], float out[3]) {
+    out[0] = out[1] = out[2] = 0;
+    const int NT = 8, NP = 12;
+    for (int i = 0; i < NT; i++) {
+        float th = (i + 0.5f) / NT * 1.5707963f;
+        for (int j = 0; j < NP; j++) {
+            float ph = (j + 0.5f) / NP * 6.2831853f;
+            float d[3] = {std::sin(th) * std::cos(ph), std::cos(th), std::sin(th) * std::sin(ph)}, L[3];
+            skySingle(a, s, d, 0.1f, 1.f, a.g, L);
+            float w = std::cos(th) * std::sin(th) * (1.5707963f / NT) * (6.2831853f / NP);
+            for (int k = 0; k < 3; k++) out[k] += L[k] * w;
+        }
+    }
+}
+
 }  // namespace te

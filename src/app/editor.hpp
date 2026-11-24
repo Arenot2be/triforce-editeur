@@ -201,6 +201,9 @@ public:
     float ambBoost = 1.f;        // (force de l'ambiance des sondes : 1 = rapport soleil / ambiance du jeu)
     SkyEnv sky;                  // (tables d'atmosphère du jeu : couleur du soleil et du ciel)
     std::string skyStatus;
+    AglParams agl;               // (réglages AGL : ciel dessiné, fondu des ombres)
+    std::string aglStatus;
+    float skyMs[3] = {1, 1, 1};  // (diffusion multiple : tables du jeu / diffusion simple, pour ce soleil)
     EnvPalette env;              // (palette d'environnement de la scène à l'heure choisie)
     std::string envStatus;
     int envMinutes = 12 * 60;   // (heure de la palette, en minutes)

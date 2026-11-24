@@ -205,6 +205,27 @@ hmax) + h1) ; couleur et relief mêlés par t.
   supposée** : 1,5·10⁻⁴ par mètre (avec elle, la couche 2 de Kokiri — densité 40 au-delà de 120 m — ferme l'horizon
   de la forêt et la couche 1 reste légère) ; réglable (clic droit sur « Brouillard »). Zones (VolumeFogAreaParam) pas
   encore appliquées : il faut les acteurs de zone de la carte.
-- **Ciel** : luminance moyenne des tables d'atmosphère pour la hauteur du soleil, × SkySunColorIntensity ; plus claire
-  et moins saturée vers l'horizon, terme de Rayleigh, halo de Mie (g = 0,8), disque du soleil ; puis le brouillard sur
-  3 km et la courbe de tons. Approximation : les blocs d'en-diffusion du skybin ne sont pas encore lus.
+- **Ciel** : voir « Réglages AGL » ci-dessous ; sans eux, dégradé de la luminance moyenne des tables d'atmosphère.
+
+## Réglages AGL (dossier agl/ : BYML « agl__…Param »)
+
+- Dossiers : BloomParam, ColorCorrectionParam, CubeMapMgrParam, DepthOfFieldParam, DirectionalLightParam (23),
+  EnvObjMgrParam (objets d'environnement par scène), FilterAAParam, HemisphereLightParam, LocalExposureParam,
+  OccludedEffectMgrParam, OfxLensFlarePresetParam, ProjectorParam, ShadowPrePassParam, SkyParam, StarParam.
+- **SkyParam/MainField** : atmosphère « Static » (celle des tables du skybin : Rayleigh (0,00411 ; 0,011275 ;
+  0,028364) par km sur 5 km, Mie 0,0018 par km sur 1 km, g 0,8 ; sol 6 360 km, haut 6 420 km) — vérifié : la
+  transmittance au zénith qu'elle donne (0,98 ; 0,95 ; 0,87) est celle du skybin à 1 % près, et l'éclairement du ciel
+  en diffusion simple vaut la moitié de celui des tables (le reste : diffusion multiple). Réglages du ciel dessiné :
+  MieAmplifierRendering 8, MieSymmetricalPropRendering 0,85, RenderSunIntensity 100, RenderSunSize 1, GroundColor ;
+  atmosphère « Dynamic » (Rayleigh sur 24 km, Mie sur 2 km, × 1 800 pour le Mie) pas utilisée ; ScatterFog (brume
+  lointaine, 0 à 15 km) et AdhocFog (verdâtre, 0 à 300 m) pas encore appliqués.
+- Ciel de l'éditeur : diffusion simple de Rayleigh et de Mie le long du rayon (16 pas, 6 vers le soleil), × la part de
+  diffusion multiple (éclairement des tables / éclairement en diffusion simple, par canal, pour ce soleil), × l'intensité
+  du ciel de la palette ; disque du soleil ; sol vu de loin.
+- **ShadowPrePassParam** : par scène avec « $parent » (KokiriForest → MainField) ; MainField : ombres dynamiques fondues
+  de 80 à 200 m (DynamicShadowFarFadeStart / End), PCF de largeur 2, FaceNormalBias 20. Appliqué : le fondu.
+- **ProjectorParam** : Kokiri a « leaves_shadow » (projection d'ombres de feuillage sur la forêt, depuis (0 ; 903,2 ;
+  501,8) vers (0 ; 100 ; −54,8), 18,1°) et le champ « cloud_proj » (ombres des nuages) ; leur texture n'est pas nommée
+  ici — pas encore appliqués.
+- **DirectionalLightParam/dir_main** : direction (−0,398 ; −0,618 ; −0,678), couleur (1,30 ; 0,95 ; 0,65), intensité
+  41,3 : soleil par défaut, remplacé en jeu par la palette.

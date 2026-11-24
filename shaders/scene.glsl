@@ -22,6 +22,12 @@ layout(std140, set = SCENE_SET, binding = 0) uniform Scene {
     vec4 lightPos[16]; // (position ; w : portée)
     vec4 lightCol[16]; // (intensité rgb, en unités × m² ; w : cos de l'angle extérieur, −2 = ponctuelle)
     vec4 lightDir[16]; // (direction du projecteur ; w : cos de l'angle intérieur)
+    vec4 skyR;         // (ciel dessiné, SkyParam : Rayleigh rgb par km, hauteur d'échelle en km)
+    vec4 skyM;         // (Mie par km, hauteur d'échelle, amplificateur de rendu, anisotropie de rendu)
+    vec4 skyX;         // (rayon du sol, de l'atmosphère (km), intensité et taille du disque du soleil)
+    vec4 skyK;         // (rgb : part de la diffusion multiple (tables du jeu / diffusion simple) ; w : soleil hors atmosphère)
+    vec4 skyG;         // (couleur du sol ; w : ciel physique)
+    vec4 shadowF;      // (fondu des ombres avec la distance : début, fin (m))
 } S;
 layout(set = SCENE_SET, binding = 1) uniform sampler2DShadow uShadow;
 
@@ -38,6 +44,8 @@ float sunShadow(vec3 wp, vec3 n) {
     s /= 9.0;
     // (fondu vers « éclairé » au bord de la carte)
     float edge = smoothstep(0.0, 0.08, min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y)));
+    // (fondu avec la distance à l'œil, ShadowPrePassParam : DynamicShadowFarFadeStart / End)
+    if (S.shadowF.y > S.shadowF.x) edge *= 1.0 - smoothstep(S.shadowF.x, S.shadowF.y, length(wp - S.eye.xyz));
     return mix(1.0, mix(1.0, s, S.shadowP.z), edge);
 }
 

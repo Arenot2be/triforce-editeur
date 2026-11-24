@@ -128,7 +128,25 @@ struct EnvPalette {
 };
 // (minutes : heure du jour en minutes, 0 à 1439)
 EnvPalette envLoad(Game& g, const std::string& scenePrefix, int minutes, std::string* status);
-void kelvinToRgb(float kelvin, float out[3]);   // (linéaire sRGB, Y = 1)
+void kelvinToRgb(float kelvin, float out[3]);
+
+// Réglages AGL du rendu (dossier « agl/ » : SkyParam/MainField, ShadowPrePassParam/<scène> avec son $parent) :
+// atmosphère du ciel dessiné (coefficients par km, hauteurs d'échelle en km), disque du soleil, sol, fondu des ombres.
+struct AglParams {
+    bool skyOk = false, shadowOk = false;
+    // (atmosphère « Static » : celle des tables précalculées du skybin ; rendu : amplificateurs et anisotropie du ciel dessiné)
+    float betaR[3] = {0.00411f, 0.011275f, 0.028364f}, HR = 5, betaM = 0.0018f, HM = 1, g = 0.8f;
+    float rayAmp = 1, mieAmp = 8, gRender = 0.85f;
+    float Rg = 6360, Rt = 6420, sunIntensity = 100, sunSize = 1, ground[3] = {0.5f, 0.4f, 0.3f};
+    float shadowFadeStart = 80, shadowFadeEnd = 200;
+    std::string skyFile, shadowFile;
+};
+AglParams aglLoad(Game& g, const std::string& scenePrefix, std::string* status);
+// (diffusion simple du ciel, par unité d'éclairement du soleil hors atmosphère : luminance dans la direction d, pour un
+//  soleil s, l'œil à altKm ; mieAmp, gM : réglages du Mie)
+void skySingle(const AglParams& a, const float s[3], const float d[3], float altKm, float mieAmp, float gM, float out[3]);
+// (éclairement du ciel vers le haut en diffusion simple, mêmes unités)
+void skySingleIrradiance(const AglParams& a, const float s[3], float out[3]);   // (linéaire sRGB, Y = 1)
 SkyEnv skyLoad(Game& g, std::string* status);
 
 FoliageSet foliageParse(const Bytes& flnt, const std::string& layer);   // (Error si ce n'est pas un fichier d'instances)

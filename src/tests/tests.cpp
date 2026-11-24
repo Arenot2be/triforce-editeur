@@ -111,6 +111,16 @@ int main(int argc, char** argv) {
                 e.at(std::sin(deg / 57.29578f), sun, sky);
                 std::printf("  %5.1f°  soleil %.3f %.3f %.3f   ciel %.4f %.4f %.4f\n", deg, sun[0], sun[1], sun[2], sky[0], sky[1], sky[2]);
             }
+        } else if (cmd == "agl") {   // romfs préfixe-de-scène -> réglages AGL du ciel et des ombres
+            Game g(u8path(argv[2]));
+            std::string st;
+            AglParams a = aglLoad(g, argv[3], &st);
+            std::printf("%s\nRayleigh %.5f %.5f %.5f / %.1f km ; Mie %.5f / %.1f km, g %.2f ; soleil %.0f × %.1f ; sol %.2f %.2f %.2f\n", st.c_str(),
+                        a.betaR[0], a.betaR[1], a.betaR[2], a.HR, a.betaM, a.HM, a.g, a.sunIntensity, a.sunSize, a.ground[0], a.ground[1], a.ground[2]);
+            float s[3] = {0, std::sin(50.8f / 57.29578f), std::cos(50.8f / 57.29578f)}, E[3], z[3], up[3] = {0, 1, 0};
+            skySingleIrradiance(a, s, E);
+            skySingle(a, s, up, 0.1f, a.mieAmp, a.gRender, z);
+            std::printf("soleil 50,8° : éclairement du ciel (diffusion simple) %.4f %.4f %.4f ; zénith %.4f %.4f %.4f\n", E[0], E[1], E[2], z[0], z[1], z[2]);
         } else if (cmd == "palette") {   // romfs préfixe-de-scène [heure] -> palette d'environnement retenue
             Game g(u8path(argv[2]));
             std::string st;

@@ -27,6 +27,7 @@ struct SceneUbo {
     float lightVP[16], invVP[16], eye[4], viewport[4], shadowP[4], sunDirS[4], sunCol[4], skyCol[4], ambUp[4];
     float fogA[2][4], fogB[2][4], fogRay[2][4], fogMie[2][4], fogAbs[2][4], fogEmit[2][4], fogLight[4], lightN[4];
     float lightPos[16][4], lightCol[16][4], lightDir[16][4];
+    float skyR[4], skyM[4], skyX[4], skyK[4], skyG[4], shadowF[4];
 };
 
 struct GpuMesh {

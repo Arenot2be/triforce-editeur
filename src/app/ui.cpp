@@ -937,8 +937,8 @@ void viewport(Editor& ed) {
     ImGui::SameLine();
     ImGui::Checkbox("Ciel", &ed.showSky);
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Ciel en arrière-plan : couleur des tables d'atmosphère du jeu pour la hauteur du soleil,\n"
-                          "plus claire vers l'horizon, halo et disque du soleil, puis le brouillard.");
+        ImGui::SetTooltip("Ciel en arrière-plan : atmosphère du jeu (agl/SkyParam : Rayleigh, Mie, disque du soleil, sol),\n"
+                          "calée sur les tables précalculées d'Env/GameScene ; puis le brouillard.\n%s", ed.aglStatus.c_str());
     ImGui::SameLine();
     ImGui::Checkbox("Tons du jeu", &ed.gameTone);
     if (ImGui::IsItemHovered())

@@ -32,6 +32,13 @@ void Editor::applyEnv() {
         float sun[3], sl[3];
         sky.at(sunDir[1], sun, sl);
         for (int c = 0; c < 3; c++) probes.sky[c] = sl[c];
+        // (ciel dessiné : la diffusion simple de SkyParam, ramenée à l'éclairement des tables du jeu, qui comptent aussi
+        //  la diffusion multiple)
+        if (agl.skyOk) {
+            float E[3];
+            skySingleIrradiance(agl, sunDir, E);
+            for (int c = 0; c < 3; c++) skyMs[c] = E[c] > 1e-6f ? std::clamp(sl[c] * 3.14159265f / E[c], 0.5f, 6.f) : 1.f;
+        }
     }
     if (env.ok) {
         float u = env.unit();
@@ -229,15 +236,20 @@ void Editor::openMap(const std::string& rel) {
                 auto sk = std::make_shared<SkyEnv>();
                 auto ss = std::make_shared<std::string>();
                 *sk = skyLoad(*g, ss.get());
+                auto ag = std::make_shared<AglParams>();
+                auto as = std::make_shared<std::string>();
+                *ag = aglLoad(*g, pre, as.get());
                 float skyL[3] = {0, 0, 0};
                 if (sk->ok) { float sun[3]; sk->at(kSunMu, sun, skyL); }
                 try { *pr = probesLoad(*g, pre, sp.get(), sk->ok ? skyL : nullptr); } catch (const std::exception& e) { *sp = std::string("sondes : ") + e.what(); }
                 try { *gl = groundLoad(*g, pre, st.get()); } catch (const std::exception& e) { *st = std::string("couverture du sol : ") + e.what(); }
                 try { *li = lightsLoad(*g, pre, sl.get()); } catch (const std::exception& e) { *sl = std::string("lumières de la scène : ") + e.what(); }
-                return [this, gl, li, st, sl, pr, sp, sk, ss, forMap] {
+                return [this, gl, li, st, sl, pr, sp, sk, ss, ag, as, forMap] {
                     if (doc.path != forMap) return;
                     sky = std::move(*sk);
                     skyStatus = *ss;
+                    agl = *ag;
+                    aglStatus = *as;
                     probes = std::move(*pr);
                     probesStatus = *sp;
                     probeCache.clear();
@@ -803,6 +815,15 @@ void Editor::render(VkCommandBuffer c) {
                 u.lightN[0] = float(n);
             }
         }
+        if (game && agl.skyOk) {
+            for (int q = 0; q < 3; q++) { u.skyR[q] = agl.betaR[q] * agl.rayAmp; u.skyK[q] = skyMs[q]; u.skyG[q] = agl.ground[q]; }
+            u.skyR[3] = agl.HR;
+            u.skyM[0] = agl.betaM; u.skyM[1] = agl.HM; u.skyM[2] = agl.mieAmp; u.skyM[3] = std::clamp(agl.gRender, -0.95f, 0.95f);
+            u.skyX[0] = agl.Rg; u.skyX[1] = agl.Rt; u.skyX[2] = agl.sunIntensity; u.skyX[3] = agl.sunSize;
+            u.skyK[3] = env.skyLux / env.unit();
+            u.skyG[3] = sky.ok ? 1.f : 0.f;
+        }
+        if (game && agl.shadowOk) { u.shadowF[0] = agl.shadowFadeStart; u.shadowF[1] = agl.shadowFadeEnd; }
         rend.setScene(u);
         if (game && showSky && sky.ok && !cam.top) rend.drawSky(c);
     }
