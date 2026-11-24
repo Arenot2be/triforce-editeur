@@ -286,6 +286,8 @@ void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const
         for (int q = 0; q < 5; q++) for (int w = 0; w < 4; w++) p.m[q][w] = sb.mp[size_t(q)][size_t(w)];
         p.m[0][3] = layered ? float(sb.recipe) : 0.f;
         p.m[2][3] = pc.m[2][3];   // (exposition de la courbe de tons du jeu)
+        p.m[1][3] = pc.m[1][3];   // (teinte du soleil : v/r et b/r)
+        p.m[4][3] = pc.m[4][3];
         int flags = (t[0] ? 1 : 0) | (t[0] && t[1] ? 2 : 0) | (t[0] && t[2] ? 4 : 0) | (kind == 4 ? 8 : 0) | (lm ? 16 : 0) |
                     (t[0] && t[3] ? 32 : 0) | (t[0] && t[4] ? 64 | (sb.rghCh & 3) << 10 : 0) | (layered && t[5] ? 128 : 0) |
                     (layered && t[6] ? 256 : 0) | (layered ? 512 : 0) | (sb.rah ? 4096 : 0) | (sb.alphaTest ? 8192 : 0);

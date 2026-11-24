@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "core/byml.hpp"
+#include "core/sarc.hpp"
 #include "core/util.hpp"
 
 namespace te {
@@ -305,8 +306,9 @@ float half2f(uint16_t h) {
 }
 }  // namespace
 
-ProbeSet probesParse(const std::vector<Bytes>& files) {
+ProbeSet probesParse(const std::vector<Bytes>& files, const float sky[3]) {
     ProbeSet ps;
+    if (sky) { for (int c = 0; c < 3; c++) ps.sky[c] = sky[c]; ps.absolute = true; }
     for (auto& d : files) {
         if (d.size() < 0x80) continue;
         // (début des sondes : après 4³, 8³, 16³ ou 32³ cellules ; on vérifie que le nombre lu tombe juste)
@@ -348,9 +350,15 @@ void ProbeSet::index() {
         float b = 0.886f * (h[2] + h[18] + sky[2] * h[3]) + 1.023f * (h[6] + h[21] + sky[2] * h[7]);
         up.push_back(0.2126f * r + 0.7152f * g + 0.0722f * b);
     }
-    if (!up.empty()) {
+    if (!up.empty() && absolute) {
+        // (unités absolues : la médiane n'est gardée que pour le bilan)
+        std::nth_element(up.begin(), up.begin() + long(up.size() / 2), up.end());
+        median = up[up.size() / 2];
+        ref = 1;
+    } else if (!up.empty()) {
         std::nth_element(up.begin(), up.begin() + long(up.size() / 2), up.end());
         ref = std::max(1e-4f, up[up.size() / 2]);
+        median = ref;
     }
 }
 
@@ -393,7 +401,7 @@ bool ProbeSet::ambient(const float p[3], float out[12]) const {
     return true;
 }
 
-ProbeSet probesLoad(Game& g, const std::string& pre, std::string* status) {
+ProbeSet probesLoad(Game& g, const std::string& pre, std::string* status, const float sky[3]) {
     std::vector<Bytes> files;
     std::string dir = "Bake/Probe/Scene/" + pre + "/";
     int n = 0;
@@ -407,9 +415,62 @@ ProbeSet probesLoad(Game& g, const std::string& pre, std::string* status) {
         if (status) *status = "sondes : pas de " + dir;
         return {};
     }
-    ProbeSet ps = probesParse(files);
-    if (status) *status = fmt("sondes : %zu (%d fichiers)", ps.size(), n);
+    ProbeSet ps = probesParse(files, sky);
+    if (status) *status = ps.absolute ? fmt("sondes : %zu (%d fichiers), ciel du jeu, éclairement médian vers le haut %.3f (soleil = 1)", ps.size(), n, double(ps.median))
+                                      : fmt("sondes : %zu (%d fichiers), ciel supposé", ps.size(), n);
     return ps;
+}
+
+// ---- ciel ----
+SkyEnv skyParse(const Bytes& b) {
+    SkyEnv e;
+    const size_t trans = 0, irrOff = 0x120000;
+    if (b.size() < irrOff + 512 * 8 * 8) return e;
+    auto texel = [&](size_t off, size_t w, size_t x, size_t y, int c) {
+        size_t o = off + 8 * (y * w + x) + 2 * size_t(c);
+        return half2f(uint16_t(b[o] | b[o + 1] << 8));
+    };
+    // (transmittance : x = altitude (0 = sol), y = direction, la dernière ligne vers le zénith)
+    for (int c = 0; c < 3; c++) e.zenithT[c] = std::clamp(texel(trans, 512, 0, 31, c), 0.05f, 1.f);
+    // (éclairement du ciel : x = altitude, y = hauteur du soleil mu = −0,2 + 1,2·y/7 ; ligne 0 = soleil couché)
+    e.irr.resize(8 * 3);
+    for (size_t y = 0; y < 8; y++)
+        for (int c = 0; c < 3; c++) e.irr[y * 3 + size_t(c)] = std::max(0.f, texel(irrOff, 512, 0, y, c));
+    e.ok = e.irr[7 * 3 + 2] > 0;
+    return e;
+}
+
+void SkyEnv::at(float mu, float sun[3], float sky[3]) const {
+    mu = std::clamp(mu, -0.2f, 1.f);
+    // (soleil : transmittance du zénith élevée à la masse d'air (Kasten et Young) ; les lignes de la table la suivent
+    //  à quelques pour cent près)
+    float zdeg = std::acos(std::clamp(mu, 0.f, 1.f)) * 57.29578f;
+    float am = mu > 0.f ? 1.f / (mu + 0.50572f * std::pow(96.07995f - zdeg, -1.6364f)) : 38.f;
+    for (int c = 0; c < 3; c++) sun[c] = mu > -0.02f ? std::pow(zenithT[c], am) : 0.f;
+    float y = (mu + 0.2f) / 1.2f * 7.f;
+    int y0 = std::clamp(int(y), 0, 6);
+    float t = std::clamp(y - float(y0), 0.f, 1.f);
+    for (int c = 0; c < 3; c++) {
+        float E = irr.empty() ? 0.f : irr[size_t(y0) * 3 + size_t(c)] * (1 - t) + irr[size_t(y0 + 1) * 3 + size_t(c)] * t;
+        sky[c] = E / 3.14159265f;   // (ciel uniforme de même éclairement : L = E / π)
+    }
+}
+
+SkyEnv skyLoad(Game& g, std::string* status) {
+    const std::string path = "Env/GameScene.Nin_Ounce_NVN2.genvb.zs";
+    try {
+        if (!g.exists(path)) { if (status) *status = "ciel : pas de " + path; return {}; }
+        Sarc s = Sarc::load(g.read(path));
+        const Bytes* sb = s.get("res/master_field.skybin");
+        if (!sb) sb = s.get("res/Master_Field.skybin");
+        if (!sb) { if (status) *status = "ciel : pas de master_field.skybin dans " + path; return {}; }
+        SkyEnv e = skyParse(*sb);
+        if (status) *status = e.ok ? "ciel : tables d'atmosphère lues (master_field.skybin)" : "ciel : tables illisibles";
+        return e;
+    } catch (const std::exception& ex) {
+        if (status) *status = std::string("ciel : ") + ex.what();
+        return {};
+    }
 }
 
 }  // namespace te

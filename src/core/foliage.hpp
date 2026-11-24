@@ -76,12 +76,27 @@ struct ProbeSet {
     //  haut : out = (a.r, a.g, a.b, M.b.x, M.r.x, M.r.y, M.r.z, M.b.y, M.g.x, M.g.y, M.g.z, M.b.z) ; false sans sonde)
     bool ambient(const float p[3], float out[12]) const;
     float sky[3] = {0.045f, 0.06f, 0.085f};   // (luminance du ciel supposée, en attendant Env/GameScene)
-    float ref = 1;                            // (éclairement médian vers le haut)
+    float ref = 1;                            // (éclairement médian vers le haut ; 1 en unités absolues)
+    bool absolute = false;
+    float median = 0;                    // (ciel du jeu connu : éclairements en unités où le soleil vaut 1)
     std::unordered_map<uint64_t, std::vector<uint32_t>> grid;   // (cases de 4 m)
     void index();
 };
-ProbeSet probesParse(const std::vector<Bytes>& files);
-ProbeSet probesLoad(Game& g, const std::string& scenePrefix, std::string* status);
+ProbeSet probesParse(const std::vector<Bytes>& files, const float sky[3] = nullptr);
+ProbeSet probesLoad(Game& g, const std::string& scenePrefix, std::string* status, const float sky[3] = nullptr);
+
+// Ciel du jeu (Env/GameScene.Nin_Ounce_NVN2.genvb → res/master_field.skybin) : tables d'atmosphère précalculées en
+// demi-flottants RGBA (transmittance 512 × 32, quatre blocs d'en-diffusion 64 × 64 × 8, éclairement du ciel 512 × 8).
+struct SkyEnv {
+    bool ok = false;
+    float zenithT[3] = {1, 1, 1};   // (transmittance au sol, soleil au zénith)
+    std::vector<float> irr;          // (éclairement du ciel au sol : 8 hauteurs du soleil × RVB)
+    // (pour un soleil de hauteur mu = sin(élévation) : couleur du soleil (transmittance) et luminance moyenne du ciel,
+    //  en unités où l'éclairement du soleil hors atmosphère vaut 1)
+    void at(float mu, float sun[3], float sky[3]) const;
+};
+SkyEnv skyParse(const Bytes& skybin);
+SkyEnv skyLoad(Game& g, std::string* status);
 
 FoliageSet foliageParse(const Bytes& flnt, const std::string& layer);   // (Error si ce n'est pas un fichier d'instances)
 FoliageSet foliageLoad(Game& g, const std::string& scenePrefix, std::string* status);

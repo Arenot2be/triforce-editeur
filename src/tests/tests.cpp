@@ -88,13 +88,28 @@ int main(int argc, char** argv) {
         } else if (cmd == "probes") {   // fichiers de sondes -> éclairement ambiant en quelques points
             std::vector<Bytes> fs;
             for (int i = 2; i < argc; i++) fs.push_back(readFile(u8path(argv[i])));
-            ProbeSet ps = probesParse(fs);
+            // (TE_ROMFS : prendre la couleur du ciel du jeu, soleil de l'éditeur)
+            float skyL[3], sunC[3];
+            const char* rf = std::getenv("TE_ROMFS");
+            SkyEnv se;
+            if (rf) { Game g(u8path(rf)); se = skyLoad(g, nullptr); if (se.ok) { se.at(0.91863f, sunC, skyL); std::printf("ciel %.4f %.4f %.4f\n", skyL[0], skyL[1], skyL[2]); } }
+            ProbeSet ps = probesParse(fs, se.ok ? skyL : nullptr);
             std::printf("%zu sondes, référence %.4f\n", ps.size(), ps.ref);
             for (size_t k = 0; k < ps.size(); k += std::max<size_t>(1, ps.size() / 10)) {
                 float o[12];
                 if (!ps.ambient(&ps.pos[3 * k], o)) continue;
                 std::printf("  (%.0f %.0f %.0f) haut %.2f %.2f %.2f  bas %.2f %.2f %.2f\n", ps.pos[3 * k], ps.pos[3 * k + 1], ps.pos[3 * k + 2],
                             o[0] + o[5], o[1] + o[9], o[2] + o[7], o[0] - o[5], o[1] - o[9], o[2] - o[7]);
+            }
+        } else if (cmd == "sky") {   // romfs -> couleur du soleil et du ciel selon la hauteur du soleil
+            Game g(u8path(argv[2]));
+            std::string st;
+            SkyEnv e = skyLoad(g, &st);
+            std::printf("%s\nzénith %.4f %.4f %.4f\n", st.c_str(), e.zenithT[0], e.zenithT[1], e.zenithT[2]);
+            for (float deg : {-5.f, 0.f, 5.f, 10.f, 20.f, 40.f, 66.7f, 90.f}) {
+                float sun[3], sky[3];
+                e.at(std::sin(deg / 57.29578f), sun, sky);
+                std::printf("  %5.1f°  soleil %.3f %.3f %.3f   ciel %.4f %.4f %.4f\n", deg, sun[0], sun[1], sun[2], sky[0], sky[1], sky[2]);
             }
         } else if (cmd == "foliage") {   // romfs préfixe-de-scène -> feuillage lu
             Game g(u8path(argv[2]));

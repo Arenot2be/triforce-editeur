@@ -11,6 +11,9 @@
 
 namespace te {
 
+// (hauteur du soleil de l'éditeur : la direction L = (0,35 ; 1 ; 0,25) des nuanceurs, soit 66,7° d'élévation)
+static const float kSunMu = 0.91863f;
+
 static double now() {
     using namespace std::chrono;
     return duration<double>(steady_clock::now().time_since_epoch()).count();
@@ -195,11 +198,18 @@ void Editor::openMap(const std::string& rel) {
                 auto li = std::make_shared<std::vector<SceneLight>>();
                 auto st = std::make_shared<std::string>(), sl = std::make_shared<std::string>(), sp = std::make_shared<std::string>();
                 auto pr = std::make_shared<ProbeSet>();
-                try { *pr = probesLoad(*g, pre, sp.get()); } catch (const std::exception& e) { *sp = std::string("sondes : ") + e.what(); }
+                auto sk = std::make_shared<SkyEnv>();
+                auto ss = std::make_shared<std::string>();
+                *sk = skyLoad(*g, ss.get());
+                float skyL[3] = {0, 0, 0};
+                if (sk->ok) { float sun[3]; sk->at(kSunMu, sun, skyL); }
+                try { *pr = probesLoad(*g, pre, sp.get(), sk->ok ? skyL : nullptr); } catch (const std::exception& e) { *sp = std::string("sondes : ") + e.what(); }
                 try { *gl = groundLoad(*g, pre, st.get()); } catch (const std::exception& e) { *st = std::string("couverture du sol : ") + e.what(); }
                 try { *li = lightsLoad(*g, pre, sl.get()); } catch (const std::exception& e) { *sl = std::string("lumières de la scène : ") + e.what(); }
-                return [this, gl, li, st, sl, pr, sp, forMap] {
+                return [this, gl, li, st, sl, pr, sp, sk, ss, forMap] {
                     if (doc.path != forMap) return;
+                    sky = std::move(*sk);
+                    skyStatus = *ss;
                     probes = std::move(*pr);
                     probesStatus = *sp;
                     probeCache.clear();
@@ -629,6 +639,13 @@ void Editor::render(VkCommandBuffer c) {
     vkCmdSetScissor(c, 0, 1, &sc);
     PC base{};
     base.m[2][3] = gameTone ? toneExposure : 0.f;   // (courbe de tons du jeu : hdr_compose d'AglShader)
+    // (teinte du soleil d'après la transmittance de l'atmosphère du jeu, pour la hauteur du soleil de l'éditeur ;
+    //  rangée en (1, v/r, b/r) dans m[1].a et m[4].a, libres pour tous les dessins)
+    if (sky.ok && showProbes) {
+        float sun[3], sl[3];
+        sky.at(kSunMu, sun, sl);
+        if (sun[0] > 1e-3f) { base.m[1][3] = sun[1] / sun[0]; base.m[4][3] = sun[2] / sun[0]; }
+    }
     // (sondes : l'ambiance autour du point visé pour le sol ; chaque objet a la sienne, plus bas)
     auto probeAt = [&](const void* key, V3 p, PC& out) {
         if (!showProbes || probes.size() == 0) return;
@@ -639,7 +656,7 @@ void Editor::render(VkCommandBuffer c) {
             for (int i = 0; i < 12; i++) e[size_t(i)] = o[i];
             e[12] = q[0]; e[13] = q[1]; e[14] = q[2];
         }
-        for (int i = 0; i < 12; i++) out.amb[i / 4][i % 4] = e[size_t(i)];
+        for (int i = 0; i < 12; i++) out.amb[i / 4][i % 4] = e[size_t(i)] * ambBoost;
     };
     probeAt(&probes, cam.target, base);   // (le point visé : au sol, plus juste que la caméra en hauteur)
     std::memcpy(base.vp, vp.m, 64);

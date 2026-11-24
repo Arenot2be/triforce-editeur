@@ -98,8 +98,9 @@ hmax) + h1) ; couleur et relief mêlés par t.
 
 ## Pas encore appliqué (fichiers manquants)
 
-- Sondes (Bake/Probe/Scene/<scène>/meta.bkprmb, resident.bkprcb, X*_Y*_Z*_*.bkprb), environnement
-  (Env/GameScene.Nin_Ounce_NVN2.genvb : ciel, soleil, couleurs), brouillard (VolumeFogAreaParam).
+- Palettes d'environnement (Pack/EnvPalette.pack : direction et force du soleil, exposition, brouillard de base selon
+  l'heure) ; le brouillard volumique (zones lues, valeurs de base manquantes) ; le dessin du ciel (blocs d'en-diffusion
+  du skybin, paramétrage pas encore établi).
 
 ## Lu mais pas encore appliqué (anciennes notes)
 
@@ -122,8 +123,44 @@ hmax) + h1) ; couleur et relief mêlés par t.
 - Enregistrement de 72 octets : position (3 floats), u32, puis 28 demi-flottants :
   - h0..h15 : lumière renvoyée RVB en harmoniques d'ordre 1 (Y00, y, z, x), avec la visibilité du ciel en h3, h7, h11, h15 ;
   - h16..h27 : second jeu RVB (B).
-- Éclairement : E = 0.886·L0 + 1.023·L1·n. Le ciel est pris constant (0.045, 0.06, 0.085) en attendant `Env/GameScene.*.genvb`.
+- Éclairement : E = 0.886·L0 + 1.023·L1·n (π·Y00 et 2π/3·Y1).
+- Sens des trois parts (vérifié sur la forêt Kokiri et le village Cocorico) : A = lumières locales cuites (orangé,
+  très fort près des lanternes) ; B = soleil renvoyé (jaune-vert, lié à la visibilité du ciel) ; h3/h7/h11/h15 =
+  projection de la visibilité du ciel (jusqu'à ~2,1 : 1,77 pour un hémisphère dégagé). Ciel = luminance du ciel ×
+  visibilité. B a l'ordre de grandeur attendu pour un soleil d'éclairement 1 : les sondes sont dans les unités des
+  tables d'atmosphère.
 - Les quatre niveaux sont lus ; autour d'un point, seul le plus fin présent compte (niveau 0 : une sonde tous les 2 m).
   Quelques sondes très fortes et orangées (près des lanternes, ex. −80, 115, −47) sont réelles : lumières locales cuites.
-- Dans l'éditeur : chaque objet reçoit l'ambiance des sondes voisines (pondération par l'inverse de la distance), normalisée
+- Dans l'éditeur, avec le ciel du jeu : éclairement en unités absolues (soleil = 1), soleil × N·L + sondes, sans
+  ombres portées ; clic droit sur « Sondes » pour forcer l'ambiance. Sans le ciel : rapporté à la médiane.
+- Chaque objet reçoit l'ambiance des sondes voisines (pondération par l'inverse de la distance), normalisée
   par la luminance médiane ; le sol prend celle du point visé. Case « Sondes ».
+
+## Ciel (Env/GameScene.Nin_Ounce_NVN2.genvb)
+
+- SARC : `gamescene.bgenv` (AAMP v2, type « genv ») et `res/master_field.skybin` (aussi `Master_Field.skybin`, identique).
+  Le bgenv associe chaque ensemble (Master_Field, KokiriForest, SacredForestMeadow, HyruleField_Child/Adult,
+  DeathMountainTrail_Adult, ZoraRiver, KakarikoVillage, Dungeon) au même skybin.
+- skybin, 1 212 416 octets sans en-tête, RGBA demi-flottants (alpha nul), rangées linéaires :
+  - 0x000000 : transmittance 512 × 32 (x = altitude, 0 = sol ; y = direction, ligne 31 = zénith, ~21,5 = horizon au sol).
+    Au zénith (0,972 ; 0,931 ; 0,837). Les lignes suivent la loi de masse d'air à quelques pour cent près.
+  - 0x020000 : quatre blocs de 256 Kio d'en-diffusion, chacun 64 × 64 × 8.
+  - 0x120000 : éclairement du ciel 512 × 8 (x = altitude ; y = hauteur du soleil, mu = −0,2 + 1,2·y/7).
+- Programmes qui les fabriquent et les lisent : `Lib/agl/agl_resource…sarc` → `agl_technique_pfx.sharcb`
+  (sky_transmittance, sky_irradiance, sky_inscatter, sky_bake_*, sky_postfx_sky/ground, sky_calc_sh ; constantes
+  cSunIntensity, cRadiusAtmosphere, cScatteringCoeffRayleigh/Mie…). Conteneur BAHS : base du code en +0x1C
+  (0x1B0000 ici), contrôle 0x98761234, code à base + (u32 104 octets avant le contrôle) ; chaque programme décrit
+  ses options et l'indice de sa première variante.
+- Dans l'éditeur : couleur du soleil = transmittance du zénith ^ masse d'air (Kasten–Young) ; luminance du ciel =
+  éclairement du ciel / π, pour la hauteur du soleil de l'éditeur (66,7°).
+
+## Brouillard (System/GameGraphics/VolumeFogAreaParam)
+
+- Un fichier par zone (KokiriForest, KokiriForest_WetArea_01/02, HyruleField_KokiriArea…), ne gardant que ce qui
+  change : Fog1Params/Fog2Params (AbsorptionRate, EmissionRate, MieScatterRate en RGBA — A sert de force —,
+  RayleighScatterRate, MieScatterAnisotropy, Near/FarDensity et leurs fondus, HeightFalloff, HeightYOffset,
+  NoiseStrength, UseHeightMap), ShapeType (empreinte de la forme), ShapeGradientWidth.
+- KokiriForest : seulement de la diffusion Rayleigh (0,8), densité qui décroît avec la hauteur (0,5), rien avant 9–10 m.
+- Les valeurs de base viennent d'ailleurs : `Pack/EnvPalette.pack` (WorldMgr/ResEnvPalette, palettes horaires
+  ResEnvPaletteTimeTable dont MainField_Bluesky, ResEnvPaletteAreaUnique ; game__wm__ResEnvPalette_VolumeFog) et
+  game__gfx__VolumeFogCommonParam — pas encore lus.

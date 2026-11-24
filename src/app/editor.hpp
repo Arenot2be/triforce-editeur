@@ -191,6 +191,9 @@ public:
     bool showProbes = true;      // (teinte ambiante des sondes de lumière de la scène, Bake/Probe)
     ProbeSet probes;
     std::string probesStatus;
+    float ambBoost = 1.f;        // (force de l'ambiance des sondes : 1 = rapport soleil / ambiance du jeu)
+    SkyEnv sky;                  // (tables d'atmosphère du jeu : couleur du soleil et du ciel)
+    std::string skyStatus;
     std::unordered_map<const void*, std::array<float, 15>> probeCache;   // (position, puis a + M·n)
     bool gameTone = false;       // (courbe de tons du jeu : ACES et gamma 2,2, AglShader « hdr_compose »)
     float toneExposure = 1.4f;   // (cartes de normales et rugosité des matériaux, comme le nuanceur du jeu)

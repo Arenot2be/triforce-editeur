@@ -18,10 +18,15 @@ vec3 gameTone(vec3 c) {
     return pow(t, vec3(0.4545454));
 }
 
+// (teinte du soleil du jeu (transmittance de l'atmosphère, Env/GameScene) : pc.m[1].a = v/r, pc.m[4].a = b/r ; 0 = teinte
+//  par défaut de l'éditeur)
+vec3 sunTint() { return pc.m[1].a > 0.0 ? vec3(1.0, pc.m[1].a, pc.m[4].a) : vec3(1.0, 0.97, 0.9); }
+
 // (éclairement ambiant des sondes de lumière du jeu (Bake/Probe), rapporté à la médiane vers le haut ; -1 sans sondes)
 vec3 probeAmbient(vec3 n) {
     vec4 a = pc.amb[0], r = pc.amb[1], g = pc.amb[2];
     if (a.x == 0.0 && a.y == 0.0 && a.z == 0.0 && r.x == 0.0) return vec3(-1.0);
     vec3 e = a.rgb + vec3(dot(r.xyz, n), dot(g.xyz, n), dot(vec3(a.w, r.w, g.w), n));
-    return clamp(e, vec3(0.05), vec3(3.0));
+    // (ciel du jeu connu (pc.m[1].a > 0) : unités absolues, soleil = 1 ; sinon rapporté à la médiane)
+    return clamp(e, vec3(pc.m[1].a > 0.0 ? 0.002 : 0.05), vec3(3.0));
 }

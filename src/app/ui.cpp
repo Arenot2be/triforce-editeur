@@ -898,8 +898,17 @@ void viewport(Editor& ed) {
     ImGui::SameLine();
     ImGui::Checkbox("Sondes", &ed.showProbes);
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Teinte ambiante des sondes de lumière de la scène (Bake/Probe) : lumière renvoyée et visibilité du ciel,\n"
-                          "harmoniques sphériques d'ordre 1, comme le nuanceur du jeu.\n%s", ed.probesStatus.c_str());
+        ImGui::SetTooltip("Lumière ambiante des sondes de la scène (Bake/Probe) : lumières locales, soleil renvoyé et ciel\n"
+                          "(visibilité × luminance du ciel du jeu), harmoniques sphériques d'ordre 1 comme le nuanceur du jeu ;\n"
+                          "soleil teinté par l'atmosphère du jeu (Env/GameScene). Pas d'ombres portées dans l'éditeur.\n"
+                          "Clic droit : force de l'ambiance.\n%s\n%s", ed.probesStatus.c_str(), ed.skyStatus.c_str());
+    if (ImGui::BeginPopupContextItem("ambiance")) {
+        ImGui::SetNextItemWidth(180);
+        ImGui::SliderFloat("Ambiance", &ed.ambBoost, 0.25f, 6.f, "× %.2f", ImGuiSliderFlags_Logarithmic);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("1 = rapport soleil / ambiance du jeu. Plus haut : faces à l'ombre plus claires\n(l'éditeur n'a ni ombres portées ni exposition automatique).");
+        if (ImGui::Button("× 1")) ed.ambBoost = 1.f;
+        ImGui::EndPopup();
+    }
     ImGui::SameLine();
     ImGui::Checkbox("Tons du jeu", &ed.gameTone);
     if (ImGui::IsItemHovered())

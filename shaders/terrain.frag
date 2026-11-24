@@ -50,7 +50,7 @@ void main() {
     vec3 n = normalize(cross(dFdx(vW), dFdy(vW)));
     if (n.y < 0.0) n = -n;
     vec3 L = normalize(vec3(0.35, 1.0, 0.25));
-    float lit = 0.45 + 0.55 * abs(dot(n, L));
+    float lit = 0.45 + 0.55 * abs(dot(n, L)), ndl = abs(dot(n, L));
     vec3 col;
     if (pc.scale.w > 0.5) {
         // (mélange bilinéaire des 4 points voisins de la grille de la tuile)
@@ -91,6 +91,7 @@ void main() {
                 if (dot(B, vec3(0.0, 0.0, 1.0)) < 0.0) B = -B;
                 vec3 N = normalize(T * tn.x + B * tn.y + n * tn.z);
                 lit = 0.4 + 0.6 * max(dot(N, L), 0.0);
+                ndl = max(dot(N, L), 0.0);
             }
         } else {
             col = vCol.rgb;
@@ -101,6 +102,6 @@ void main() {
     }
     // (sondes de la scène : teinte ambiante autour de la caméra)
     vec3 pa = probeAmbient(n);
-    vec3 litc = pa.x >= 0.0 ? lit * (0.45 + 0.55 * pa) : vec3(lit);
+    vec3 litc = pa.x < 0.0 ? vec3(lit) : pc.m[1].a > 0.0 ? ndl * sunTint() + pa : lit * (0.45 * sunTint() + 0.55 * pa);
     outColor = vec4(gameTone(col * litc), 1.0);
 }

@@ -134,8 +134,15 @@ void main() {
     vec3 pa = probeAmbient(n);
     vec3 litc = vec3(lit);
     if (pa.x >= 0.0) {
-        float sun = hasN ? 0.45 * max(dot(n, L), 0.0) : 0.5 * abs(dot(n, L));
-        litc = sun * vec3(1.0, 0.97, 0.9) + 0.55 * pa;
+        if (pc.m[1].a > 0.0) {
+            // (ciel du jeu connu : éclairements dans les unités du jeu, soleil = 1 — soleil × N·L + sondes, comme la
+            //  passe d'éclairage du nuanceur « model », sans les ombres)
+            float ndl = hasN ? max(dot(n, L), 0.0) : abs(dot(n, L));
+            litc = ndl * sunTint() + pa;
+        } else {
+            float sun = hasN ? 0.45 * max(dot(n, L), 0.0) : 0.5 * abs(dot(n, L));
+            litc = sun * sunTint() + 0.55 * pa;
+        }
     }
     litc *= mix(1.0, ao, 0.6);
     vec3 col = c.rgb * mix(litc, litc * baked * 1.15, 0.7);
@@ -143,12 +150,12 @@ void main() {
     vec3 V = normalize(vEye - vW), H = normalize(L + V);
     float sm = (1.0 - rough) * (1.0 - rough);
     float spec = (flags & 64) != 0 ? sm * pow(max(dot(n, H), 0.0), mix(6.0, 96.0, sm)) * 0.35 : 0.0;
-    col += vec3(1.0, 0.96, 0.88) * spec;
+    col += sunTint() * spec;
     if (lm) {
         // (carte du jeu, deux canaux : r = lumière du ciel reçue (occlusion ambiante), g = soleil reçu (ombres portées))
         vec2 B = texture(uLight, vBake * pc.color.zw + pc.color.xy).rg;
         float ndl = hasN ? max(dot(n, L), 0.0) : abs(dot(n, L));
-        vec3 sky = vec3(0.62, 0.67, 0.74), sun = vec3(1.0, 0.94, 0.82) * 0.55;
+        vec3 sky = vec3(0.62, 0.67, 0.74), sun = sunTint() * 0.55;
         col = c.rgb * (0.03 + sky * B.r * 0.8 + sun * B.g * mix(0.45, 1.0, ndl));
     }
     if (pc.pos.w > 0.5) col = mix(col, vec3(1.0, 0.82, 0.3), pc.pos.w > 1.5 ? 0.18 : 0.38);
