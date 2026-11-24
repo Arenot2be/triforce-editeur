@@ -1,6 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+#define SCENE_SET 2
+#include "scene.glsl"
 // Eau : la carte de normales du matériau d'eau du jeu (ou des vagues calculées s'il n'y en a pas), défilant dans
 // deux sens ; reflet du ciel selon l'angle (Fresnel), couleur du fond, éclat du soleil.
 // pc.color : rgb = couleur de l'eau en profondeur, a = temps (s) ; pc.scale.w : 1 = carte de normales liée,
@@ -71,7 +73,7 @@ void main() {
     vec3 sky = mix(vec3(0.78, 0.86, 0.9), vec3(0.32, 0.52, 0.78), clamp(r.y, 0.0, 1.0));
     vec3 deep = pc.color.rgb;
     // (un peu de lumière diffuse dans l'eau, pour que la couleur du fond ne soit pas uniforme)
-    vec3 L = normalize(vec3(0.35, 0.75, 0.35));
+    vec3 L = S.sunDirS.w > 0.5 ? S.sunDirS.xyz : normalize(vec3(0.35, 0.75, 0.35));
     vec3 body = deep * (0.75 + 0.35 * max(dot(n, L), 0.0));
     vec3 col = mix(body, sky, fres);
     // (eau rapide : un peu plus claire, comme l'écume légère des courants)
@@ -79,5 +81,11 @@ void main() {
     float spec = pow(max(dot(r, L), 0.0), 180.0) * 1.6 + pow(max(dot(r, L), 0.0), 24.0) * 0.12;
     col += vec3(1.0, 0.97, 0.9) * spec;
     if (pc.pos.w > 0.5) col = mix(col, vec3(1.0, 0.82, 0.3), pc.pos.w > 1.5 ? 0.18 : 0.38);
-    outColor = vec4(gameTone(col), clamp(mix(0.62, 0.95, fres) + spec, 0.0, 1.0));
+    vec3 outc = gameTone(col);
+    if (S.sunDirS.w > 0.5 && S.skyCol.w > 0.5) {
+        // (brouillard : transmittance et lumière diffusée, mêlées à la couleur affichée de l'eau)
+        vec3 ins = fogApply(vec3(0.0), vW), tr = fogApply(vec3(1.0), vW) - ins;
+        outc = outc * tr + sceneTone(ins) * (1.0 - tr);
+    }
+    outColor = vec4(outc, clamp(mix(0.62, 0.95, fres) + spec, 0.0, 1.0));
 }

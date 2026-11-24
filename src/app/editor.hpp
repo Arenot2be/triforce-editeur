@@ -148,6 +148,12 @@ public:
     void focus(const std::vector<Rec*>& recs);
     void fitAll();
     void render(VkCommandBuffer c);
+    void renderShadow(VkCommandBuffer c);   // (carte d'ombre du soleil, avant la passe principale)
+    bool showShadows = true, showFog = true, showSky = true;
+    float fogDensity = 1.f;      // (multiplie l'échelle supposée des densités du brouillard)
+    M4 lightVP_;
+    float shadowRadius_ = 100.f;
+    bool shadowOn_ = false, inShadow_ = false;
 
     // -- poignées (dessinées par l'interface)
     Gizmo drag;
@@ -197,7 +203,7 @@ public:
     std::string skyStatus;
     EnvPalette env;              // (palette d'environnement de la scène à l'heure choisie)
     std::string envStatus;
-    int envHour = 12;
+    int envMinutes = 12 * 60;   // (heure de la palette, en minutes)
     float expoComp = 0.f;        // (correction d'exposition, en IL, par rapport à celle de la palette)
     float sunDir[3] = {0.32152f, 0.91863f, 0.22966f};
     void applyEnv();             // (relit la palette et met à jour soleil, ciel et échelles des sondes)

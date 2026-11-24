@@ -22,6 +22,13 @@ struct PC {
 };
 static_assert(sizeof(PC) == 256, "constantes de 256 octets");
 
+// (lumière de la scène, voir shaders/scene.glsl : même disposition std140)
+struct SceneUbo {
+    float lightVP[16], invVP[16], eye[4], viewport[4], shadowP[4], sunDirS[4], sunCol[4], skyCol[4], ambUp[4];
+    float fogA[2][4], fogB[2][4], fogRay[2][4], fogMie[2][4], fogAbs[2][4], fogEmit[2][4], fogLight[4], lightN[4];
+    float lightPos[16][4], lightCol[16][4], lightDir[16][4];
+};
+
 struct GpuMesh {
     VkBuf vb, ib;
     struct Sub { uint32_t start, count; std::string tex; int kind = 0; std::string nrm, flow;
@@ -74,6 +81,7 @@ public:
     std::vector<LineVert> lines, linesTop;
 
     void bindMesh(VkCommandBuffer c);
+    void bindMeshBlend(VkCommandBuffer c);   // (parties transparentes, après l'eau : la lumière de la scène est remise)
     // translucent : seulement les parties sans texture d'eau, de fondu ou de verre (à dessiner après le reste) ;
     // sinon tout sauf elles
     // (tex : par partie, couleur, seconde couleur, détail ; VK_NULL_HANDLE = sans)
@@ -94,7 +102,29 @@ public:
     std::vector<FxBatch> fxBatches;
     void drawFx(VkCommandBuffer c, const PC& pc);
 
+    // (lumière de la scène : tampon par image, carte d'ombre du soleil, ciel)
+    VkDescriptorSetLayout sceneLayout = VK_NULL_HANDLE;
+    VkDescriptorPool scenePool = VK_NULL_HANDLE;
+    VkDescriptorSet sceneSet[Vk::FRAMES]{};
+    VkBuf sceneBuf[Vk::FRAMES];
+    VkImage shadowImg = VK_NULL_HANDLE;
+    VkDeviceMemory shadowMem = VK_NULL_HANDLE;
+    VkImageView shadowView = VK_NULL_HANDLE;
+    VkSampler shadowSampler = VK_NULL_HANDLE;
+    VkRenderPass shadowPass = VK_NULL_HANDLE;
+    VkFramebuffer shadowFb = VK_NULL_HANDLE;
+    uint32_t shadowSize = 4096;
+    VkPipeline shadowMeshPipe = VK_NULL_HANDLE, shadowTerrPipe = VK_NULL_HANDLE, skyPipe = VK_NULL_HANDLE;
+    VkPipelineLayout skyLayout = VK_NULL_HANDLE;
+    bool shadowMode = false;   // (entre beginShadow et endShadow : modèles et terrain dans la carte d'ombre)
+    void setScene(const SceneUbo& u);
+    void beginShadow(VkCommandBuffer c);
+    void endShadow(VkCommandBuffer c);
+    void drawSky(VkCommandBuffer c);
+
 private:
+    VkRenderPass passFor_ = VK_NULL_HANDLE;   // (pipeline() : passe de la carte d'ombre au lieu de la passe principale)
+    void initScene();
     VkBuf lineBuf_[Vk::FRAMES], fxBuf_[Vk::FRAMES];
     VkPipeline pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs, size_t fsz, uint32_t stride,
                         const std::vector<VkVertexInputAttributeDescription>& attrs, VkPrimitiveTopology topo, bool depthTest, bool depthWrite, bool cull,

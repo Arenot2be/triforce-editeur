@@ -908,11 +908,37 @@ void viewport(Editor& ed) {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("1 = rapport soleil / ambiance du jeu. Plus haut : faces à l'ombre plus claires\n(l'éditeur n'a ni ombres portées ni exposition automatique).");
         if (ImGui::Button("× 1")) ed.ambBoost = 1.f;
         ImGui::SetNextItemWidth(180);
-        if (ImGui::SliderInt("Heure", &ed.envHour, 0, 23, "%d h")) ed.applyEnv();
+        {
+            char hb[16];
+            std::snprintf(hb, sizeof hb, "%02d:%02d", ed.envMinutes / 60, ed.envMinutes % 60);
+            if (ImGui::SliderInt("Heure", &ed.envMinutes, 0, 1439, hb)) ed.applyEnv();
+        }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Heure de la palette d'environnement du jeu (Pack/EnvPalette.pack) :\ncouleur et force du soleil, exposition, lumière renvoyée.");
         ImGui::TextDisabled("%s", ed.envStatus.c_str());
         ImGui::EndPopup();
     }
+    ImGui::SameLine();
+    ImGui::Checkbox("Ombres", &ed.showShadows);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Ombres portées du soleil de la palette (carte d'ombre de 4096², autour du point visé).\n"
+                          "Avec « Sondes » et la palette d'environnement du jeu.");
+    ImGui::SameLine();
+    ImGui::Checkbox("Brouillard", &ed.showFog);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Brouillard volumique de la palette (VolumeFogParams1/2) : densités près et loin, hauteur,\n"
+                          "diffusion Rayleigh et Mie éclairée par le soleil et le ciel, absorption, émission.\n"
+                          "L'unité des densités du jeu n'est pas connue : clic droit pour l'ajuster.");
+    if (ImGui::BeginPopupContextItem("brouillard")) {
+        ImGui::SetNextItemWidth(180);
+        ImGui::SliderFloat("Densité", &ed.fogDensity, 0.05f, 20.f, "× %.2f", ImGuiSliderFlags_Logarithmic);
+        if (ImGui::Button("× 1")) ed.fogDensity = 1.f;
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Ciel", &ed.showSky);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Ciel en arrière-plan : couleur des tables d'atmosphère du jeu pour la hauteur du soleil,\n"
+                          "plus claire vers l'horizon, halo et disque du soleil, puis le brouillard.");
     ImGui::SameLine();
     ImGui::Checkbox("Tons du jeu", &ed.gameTone);
     if (ImGui::IsItemHovered())
@@ -937,7 +963,8 @@ void viewport(Editor& ed) {
     ImGui::Checkbox("Lumières", &ed.showLights);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Lumières de la scène (Bake/Light) : halos de leur couleur, faisceaux des projecteurs,\n"
-                          "voiles des lumières rectangulaires. Elles n'éclairent pas encore les modèles.\n%s", ed.lightsStatus.c_str());
+                          "voiles des lumières rectangulaires. En lumière du jeu, les 16 lumières ponctuelles (lanternes…)\n"
+                          "les plus proches du point visé éclairent aussi modèles et sol (intensité lue en candelas).\n%s", ed.lightsStatus.c_str());
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Particules des emplacements d'effet (EftLoc) : feuilles, brume, rides, embruns, lueurs…\nTextures du jeu, mouvement d'après la famille de l'effet");
     fl.end();
     if (!ed.bake.empty()) {

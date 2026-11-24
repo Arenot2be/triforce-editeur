@@ -100,21 +100,34 @@ struct SkyEnv {
 SkyEnv skyParse(const Bytes& skybin);
 
 // Palette d'environnement du jeu (Pack/EnvPalette.pack → WorldMgr/ResEnvPaletteTimeTable puis ResEnvPalette) pour une
-// heure donnée : soleil (direction forcée par la scène, couleur par température, éclairement en lux), exposition (EV),
-// échelles de la lumière renvoyée.
+// heure donnée, fondue avec la précédente pendant son BlendTime (minutes) selon sa courbe d'Hermite : soleil (direction
+// forcée par la scène ou selon l'heure, couleur par température, éclairement en lux), exposition (EV), échelles de la
+// lumière renvoyée, brouillard volumique de base (VolumeFogParams1/2).
+struct FogLayer {
+    bool on = false, heightMap = false;
+    float absorb[3] = {0, 0, 0}, emit[3] = {0, 0, 0}, mie[3] = {1, 1, 1};   // (couleurs × leur alpha)
+    float absorbD = 0, emitD = 0, mieD = 0, rayD = 0;
+    float nearD = 0, nfs = 0, nfe = 0, farD = 0, ffs = 0, ffe = 0;      // (densité près / loin et leurs fondus, m)
+    float falloff = 0, yoff = 0, aniso = 0.2f, noise = 0;
+};
 struct EnvPalette {
     bool ok = false;
-    std::string table, palette;          // (noms retenus)
+    std::string table, palette, palette2;   // (table, palette de l'heure, palette précédente en cours de fondu)
+    float blend = 1;                        // (part de la palette de l'heure, 1 = fondu fini)
     bool forcedSun = false;
-    float sunEl = 0, sunAz = 0;          // (degrés)
-    float sunColor[3] = {1, 1, 1};       // (linéaire, luminance 1, après la balance des blancs du jeu)
+    float sunEl = 0, sunAz = 0;             // (degrés)
+    float sunColor[3] = {1, 1, 1};          // (linéaire, luminance 1, après la balance des blancs du jeu)
     float sunLux = 1e4f, skyLux = 1e4f, ev = 10;   // (BgDifIntensity, SkySunColorIntensity, ExposureValue)
-    float unit() const { return sunLux > 1.f ? sunLux : std::max(skyLux, 1.f); }   // (lux d'une unité d'éclairement de l'éditeur)
     float bounceScale = 1, skyBounceScale = 1, ambientIntensity = 1;
+    bool fogOn = false;
+    FogLayer fog[2];
+    float fogMainLight = 1, fogSkyLight = 1, fogBakeLight = 1;
+    float unit() const { return sunLux > 1.f ? sunLux : std::max(skyLux, 1.f); }   // (lux d'une unité d'éclairement de l'éditeur)
     // (exposition du jeu : unité (lux) / (π · 1,2 · 2^EV), pour des éclairements comptés en unités)
     float exposure() const;
 };
-EnvPalette envLoad(Game& g, const std::string& scenePrefix, int hour, std::string* status);
+// (minutes : heure du jour en minutes, 0 à 1439)
+EnvPalette envLoad(Game& g, const std::string& scenePrefix, int minutes, std::string* status);
 void kelvinToRgb(float kelvin, float out[3]);   // (linéaire sRGB, Y = 1)
 SkyEnv skyLoad(Game& g, std::string* status);
 

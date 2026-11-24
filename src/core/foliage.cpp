@@ -491,9 +491,87 @@ void kelvinToRgb(float T, float out[3]) {
 
 float EnvPalette::exposure() const { return unit() / (3.14159265f * 1.2f * std::pow(2.f, ev)); }
 
-EnvPalette envLoad(Game& g, const std::string& pre, int hour, std::string* status) {
+namespace {
+// (valeurs d'une palette, toutes mélangeables)
+struct PalVals {
+    float sunColor[3] = {1, 1, 1}, sunLux = 1e4f, skyLux = 1e4f, ev = 10, bounce = 1, skyBounce = 1, ambient = 1;
+    bool fogOn = false;
+    FogLayer fog[2];
+    float fogMain = 1, fogSky = 1, fogBake = 1;
+};
+double vnum(const Value* v, double d) { return v && v->isNum() ? v->num() : d; }
+bool vflag(const Value* v) { return v && v->t == T::Bool && v->b; }
+void vcol(const Value* c, float out[3], bool alpha) {
+    if (!c || !c->isMap()) return;
+    float a = alpha ? float(vnum(c->get("A"), 1)) : 1.f;
+    out[0] = float(vnum(c->get("R"), out[0])) * a; out[1] = float(vnum(c->get("G"), out[1])) * a; out[2] = float(vnum(c->get("B"), out[2])) * a;
+}
+PalVals palRead(const Value& q) {
+    PalVals v;
+    v.sunLux = float(vnum(q.get("BgDifIntensity"), 1e4));
+    v.ev = float(vnum(q.get("ExposureValue"), 10));
+    v.skyLux = float(vnum(q.get("SkySunColorIntensity"), v.sunLux));
+    v.bounce = float(vnum(q.get("DirectionalLightBounceScale"), 1));
+    v.skyBounce = float(vnum(q.get("SkyLightBounceScale"), 1));
+    v.ambient = float(vnum(q.get("AmbientIntensity"), 1));
+    float col[3] = {1, 1, 1}, tc[3] = {1, 1, 1}, wb[3];
+    vcol(q.get("BgDifColor"), col, false);
+    if (vflag(q.get("BgDifUseTemperature"))) kelvinToRgb(float(vnum(q.get("BgDifTemperature"), 6500)), tc);
+    kelvinToRgb(float(vnum(q.get("WhiteBalanceTemperature"), 6500)), wb);
+    for (int c = 0; c < 3; c++) v.sunColor[c] = col[c] * tc[c] / std::max(1e-3f, wb[c]);
+    float lum = 0.2126f * v.sunColor[0] + 0.7152f * v.sunColor[1] + 0.0722f * v.sunColor[2];
+    for (float& x : v.sunColor) x /= std::max(1e-3f, lum);
+    v.fogOn = !q.get("VolumeFogIsEnabled") || vflag(q.get("VolumeFogIsEnabled"));
+    v.fogMain = float(vnum(q.get("VolumeFogMainLightScale"), 1));
+    v.fogSky = float(vnum(q.get("VolumeFogProbeSkyLightScale"), 1));
+    v.fogBake = float(vnum(q.get("VolumeFogProbeBakeLightScale"), 1));
+    for (int k = 0; k < 2; k++) {
+        FogLayer& f = v.fog[k];
+        const Value* en = q.get(k == 0 ? "VolumeFogEnableFog1" : "VolumeFogEnableFog2");
+        const Value* p = q.get(k == 0 ? "VolumeFogParams1" : "VolumeFogParams2");
+        f.on = p && p->isMap() && (!en || vflag(en));
+        if (!p || !p->isMap()) continue;
+        vcol(p->get("AbsorptionColor"), f.absorb, true);
+        vcol(p->get("EmissionColor"), f.emit, true);
+        vcol(p->get("MieColor"), f.mie, true);
+        f.absorbD = float(vnum(p->get("AbsorptionDensity"), 0));
+        f.emitD = float(vnum(p->get("EmissionDensity"), 0));
+        f.mieD = float(vnum(p->get("MieDensity"), 0));
+        f.rayD = float(vnum(p->get("RayleighDensity"), 0));
+        f.nearD = float(vnum(p->get("NearDensity"), 0));
+        f.nfs = float(vnum(p->get("NearFadeStart"), 0));
+        f.nfe = float(vnum(p->get("NearFadeEnd"), 0));
+        f.farD = float(vnum(p->get("FarDensity"), 0));
+        f.ffs = float(vnum(p->get("FarFadeStart"), 0));
+        f.ffe = float(vnum(p->get("FarFadeEnd"), 0));
+        f.falloff = float(vnum(p->get("EHFFalloff"), 0));
+        f.yoff = float(vnum(p->get("EHFYOffset"), 0));
+        f.aniso = float(vnum(p->get("MieAnisotropy"), 0.2));
+        f.noise = float(vnum(p->get("NoiseStrength"), 0));
+        f.heightMap = vflag(p->get("UseHeightMap"));
+    }
+    return v;
+}
+float lerpf(float a, float b, float t) { return a + (b - a) * t; }
+void fogLerp(FogLayer& o, const FogLayer& a, const FogLayer& b, float t) {
+    // (couche absente d'un côté : sa densité va vers 0)
+    FogLayer A = a, B = b;
+    if (!A.on) { A = B; A.nearD = A.farD = 0; }
+    if (!B.on) { B = A; B.nearD = B.farD = 0; }
+    o.on = a.on || b.on;
+    o.heightMap = t < 0.5f ? A.heightMap : B.heightMap;
+    for (int c = 0; c < 3; c++) { o.absorb[c] = lerpf(A.absorb[c], B.absorb[c], t); o.emit[c] = lerpf(A.emit[c], B.emit[c], t); o.mie[c] = lerpf(A.mie[c], B.mie[c], t); }
+    o.absorbD = lerpf(A.absorbD, B.absorbD, t); o.emitD = lerpf(A.emitD, B.emitD, t); o.mieD = lerpf(A.mieD, B.mieD, t); o.rayD = lerpf(A.rayD, B.rayD, t);
+    o.nearD = lerpf(A.nearD, B.nearD, t); o.nfs = lerpf(A.nfs, B.nfs, t); o.nfe = lerpf(A.nfe, B.nfe, t);
+    o.farD = lerpf(A.farD, B.farD, t); o.ffs = lerpf(A.ffs, B.ffs, t); o.ffe = lerpf(A.ffe, B.ffe, t);
+    o.falloff = lerpf(A.falloff, B.falloff, t); o.yoff = lerpf(A.yoff, B.yoff, t); o.aniso = lerpf(A.aniso, B.aniso, t); o.noise = lerpf(A.noise, B.noise, t);
+}
+}  // namespace
+
+EnvPalette envLoad(Game& g, const std::string& pre, int minutes, std::string* status) {
     EnvPalette e;
     const std::string path = "Pack/EnvPalette.pack.zs";
+    minutes = ((minutes % 1440) + 1440) % 1440;
     try {
         if (!g.exists(path)) { if (status) *status = "palette : pas de " + path; return e; }
         Sarc s = Sarc::load(g.read(path));
@@ -513,55 +591,82 @@ EnvPalette envLoad(Game& g, const std::string& pre, int hour, std::string* statu
         if (!tt) { if (status) *status = "palette : pas de table horaire"; return e; }
         e.table = n;
         const Value& r = tt->root;
-        auto num = [](const Value* v, double d) { return v && v->isNum() ? v->num() : d; };
-        auto flag = [](const Value* v) { return v && v->t == T::Bool && v->b; };
-        e.forcedSun = flag(r.get("IsForceMainLight"));
-        e.sunEl = float(num(r.get("MainLight_Elevation"), 0));
-        e.sunAz = float(num(r.get("MainLight_Azimuth"), 0));
-        // (entrée de l'heure voulue : la dernière qui commence avant elle, sinon la dernière de la journée)
-        const Value* arr = r.get("TimeTableArray");
-        std::string pal;
-        if (arr && arr->isArray() && !arr->a->empty()) {
-            int best = -1, bestT = -1, lastT = -1;
-            std::string last;
-            for (size_t i = 0; i < arr->a->size(); i++) {
-                const Value& it = (*arr->a)[i];
-                int t = int(num(it.get("Hour"), 0)) * 60 + int(num(it.get("Min"), 0));
+        e.forcedSun = vflag(r.get("IsForceMainLight"));
+        e.sunEl = float(vnum(r.get("MainLight_Elevation"), 0));
+        e.sunAz = float(vnum(r.get("MainLight_Azimuth"), 0));
+        // (entrées triées par heure ; celle de l'heure voulue est la dernière commencée — sinon la dernière de la
+        //  veille — et la précédente est celle d'avant, en tournant)
+        struct Ent { int t; std::string pal; float blendMin; bool curve; float d[4]; };
+        std::vector<Ent> ents;
+        if (const Value* arr = r.get("TimeTableArray"); arr && arr->isArray())
+            for (auto& it : *arr->a) {
                 const Value* p = it.get("EnvPalette");
                 if (!p || p->t != T::String) continue;
-                if (t <= hour * 60 && t > bestT) { bestT = t; best = int(i); pal = p->s; }
-                if (t > lastT) { lastT = t; last = p->s; }
+                Ent en{int(vnum(it.get("Hour"), 0)) * 60 + int(vnum(it.get("Min"), 0)), p->s, float(vnum(it.get("BlendTime"), 0)),
+                       vflag(it.get("IsBlendCurve")), {0, 0, 1, 0}};
+                if (const Value* c = it.get("Curve"); c && c->isMap())
+                    if (const Value* d = c->get("Data"); d && d->isArray() && d->a->size() >= 4)
+                        for (int k = 0; k < 4; k++) en.d[k] = float((*d->a)[size_t(k)].num());
+                size_t a = en.pal.find_last_of('/'), b = en.pal.find(".game__");
+                if (a != std::string::npos && b != std::string::npos && b > a) en.pal = en.pal.substr(a + 1, b - a - 1);
+                ents.push_back(en);
             }
-            if (best < 0) pal = last;
+        if (ents.empty()) { if (status) *status = "palette : table horaire vide (" + n + ")"; return e; }
+        std::sort(ents.begin(), ents.end(), [](const Ent& a, const Ent& b) { return a.t < b.t; });
+        int cur = int(ents.size()) - 1;
+        for (int i = 0; i < int(ents.size()); i++) if (ents[size_t(i)].t <= minutes) cur = i;
+        int prev = (cur + int(ents.size()) - 1) % int(ents.size());
+        const Ent& E = ents[size_t(cur)];
+        int since = (minutes - E.t + 1440) % 1440;
+        float t = E.blendMin > 0 ? std::clamp(float(since) / E.blendMin, 0.f, 1.f) : 1.f;
+        if (E.curve) {
+            // (courbe d'Hermite : points 0 → 1, tangentes Data[1] et Data[3])
+            float t2 = t * t, t3 = t2 * t;
+            t = std::clamp((2 * t3 - 3 * t2 + 1) * E.d[0] + (t3 - 2 * t2 + t) * E.d[1] + (-2 * t3 + 3 * t2) * E.d[2] + (t3 - t2) * E.d[3], 0.f, 1.f);
         }
-        // (« Work/WorldMgr/ResEnvPalette/X.game__wm__ResEnvPalette.gyml » → X)
-        size_t a = pal.find_last_of('/'), b = pal.find(".game__");
-        if (a != std::string::npos && b != std::string::npos && b > a) pal = pal.substr(a + 1, b - a - 1);
-        auto pd = doc("ResEnvPalette", pal, "ResEnvPalette");
-        if (!pd) { if (status) *status = "palette : " + pal + " introuvable"; return e; }
-        e.palette = pal;
-        const Value& q = pd->root;
-        e.sunLux = float(num(q.get("BgDifIntensity"), 1e4));
-        e.ev = float(num(q.get("ExposureValue"), 10));
-        e.skyLux = float(num(q.get("SkySunColorIntensity"), e.sunLux));
-        e.bounceScale = float(num(q.get("DirectionalLightBounceScale"), 1));
-        e.skyBounceScale = float(num(q.get("SkyLightBounceScale"), 1));
-        e.ambientIntensity = float(num(q.get("AmbientIntensity"), 1));
-        float col[3] = {1, 1, 1};
-        if (const Value* c = q.get("BgDifColor"); c && c->isMap()) {
-            col[0] = float(num(c->get("R"), 1)); col[1] = float(num(c->get("G"), 1)); col[2] = float(num(c->get("B"), 1));
+        auto pd = doc("ResEnvPalette", E.pal, "ResEnvPalette");
+        if (!pd) { if (status) *status = "palette : " + E.pal + " introuvable"; return e; }
+        PalVals A = palRead(pd->root), B = A;
+        e.palette = E.pal;
+        if (t < 1.f && prev != cur)
+            if (auto pp = doc("ResEnvPalette", ents[size_t(prev)].pal, "ResEnvPalette")) { B = palRead(pp->root); e.palette2 = ents[size_t(prev)].pal; }
+        if (e.palette2.empty()) t = 1.f;
+        e.blend = t;
+        // (B → A : éclairements et exposition en échelle logarithmique, le reste linéairement)
+        auto lg = [&](float b, float a) { return std::exp(lerpf(std::log(std::max(b, 1e-3f)), std::log(std::max(a, 1e-3f)), t)); };
+        for (int c = 0; c < 3; c++) e.sunColor[c] = lerpf(B.sunColor[c] * B.sunLux, A.sunColor[c] * A.sunLux, t);
+        e.sunLux = lg(B.sunLux, A.sunLux);
+        for (int c = 0; c < 3; c++) e.sunColor[c] /= std::max(1e-3f, lerpf(B.sunLux, A.sunLux, t));
+        e.skyLux = lg(B.skyLux, A.skyLux);
+        e.ev = lerpf(B.ev, A.ev, t);
+        e.bounceScale = lerpf(B.bounce, A.bounce, t);
+        e.skyBounceScale = lerpf(B.skyBounce, A.skyBounce, t);
+        e.ambientIntensity = lerpf(B.ambient, A.ambient, t);
+        e.fogOn = A.fogOn || B.fogOn;
+        for (int k = 0; k < 2; k++) {
+            FogLayer fa = A.fog[k], fb = B.fog[k];
+            if (!A.fogOn) fa.on = false;
+            if (!B.fogOn) fb.on = false;
+            fogLerp(e.fog[k], fb, fa, t);
         }
-        float tc[3] = {1, 1, 1}, wb[3];
-        if (flag(q.get("BgDifUseTemperature"))) kelvinToRgb(float(num(q.get("BgDifTemperature"), 6500)), tc);
-        kelvinToRgb(float(num(q.get("WhiteBalanceTemperature"), 6500)), wb);
-        float lum = 0;
-        for (int c = 0; c < 3; c++) { e.sunColor[c] = col[c] * tc[c] / std::max(1e-3f, wb[c]); }
-        lum = 0.2126f * e.sunColor[0] + 0.7152f * e.sunColor[1] + 0.0722f * e.sunColor[2];
-        for (float& v : e.sunColor) v /= std::max(1e-3f, lum);
+        e.fogMainLight = lerpf(B.fogMain, A.fogMain, t);
+        e.fogSkyLight = lerpf(B.fogSky, A.fogSky, t);
+        e.fogBakeLight = lerpf(B.fogBake, A.fogBake, t);
+        if (!e.forcedSun) {
+            // (soleil non fixé : course simple, levé à 6 h à l'est, 60° à midi, couché à 18 h ; la nuit, la lune en face)
+            float h = float(minutes) / 60.f, ph = (h - 6.f) / 12.f * 3.14159265f;
+            float el = 60.f * std::sin(ph), az = 90.f + 180.f * (h - 6.f) / 12.f;
+            if (el < 3.f) { el = std::max(8.f, 45.f * std::fabs(std::sin(ph))); az += 180.f; }
+            e.sunEl = el;
+            e.sunAz = std::fmod(az + 720.f, 360.f);
+        }
         e.ok = true;
-        if (status)
-            *status = fmt("palette : %s → %s (%d h) ; soleil %s%.1f° / %.0f°, %.0f lux (ciel %.0f), EV %.1f", e.table.c_str(), e.palette.c_str(), hour,
-                          e.forcedSun ? "fixé " : "", double(e.sunEl), double(e.sunAz), double(e.sunLux), double(e.skyLux), double(e.ev));
+        if (status) {
+            *status = fmt("palette : %s → %s", e.table.c_str(), e.palette.c_str());
+            if (!e.palette2.empty()) *status += fmt(" (fondu depuis %s, %.0f %%)", e.palette2.c_str(), double(t * 100));
+            *status += fmt(" à %02d:%02d ; soleil %s%.1f° / %.0f°, %.0f lux (ciel %.0f), EV %.1f", minutes / 60, minutes % 60, e.forcedSun ? "fixé " : "",
+                           double(e.sunEl), double(e.sunAz), double(e.sunLux), double(e.skyLux), double(e.ev));
+        }
         return e;
     } catch (const std::exception& ex) {
         if (status) *status = std::string("palette : ") + ex.what();

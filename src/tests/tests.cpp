@@ -114,9 +114,14 @@ int main(int argc, char** argv) {
         } else if (cmd == "palette") {   // romfs préfixe-de-scène [heure] -> palette d'environnement retenue
             Game g(u8path(argv[2]));
             std::string st;
-            EnvPalette e = envLoad(g, argv[3], argc > 4 ? std::atoi(argv[4]) : 12, &st);
+            EnvPalette e = envLoad(g, argv[3], argc > 4 ? int(std::atof(argv[4]) * 60) : 12 * 60, &st);
             std::printf("%s\ncouleur du soleil %.3f %.3f %.3f ; exposition %.3f ; renvoi %.2f, ciel %.2f, ambiance %.2f\n", st.c_str(),
                         e.sunColor[0], e.sunColor[1], e.sunColor[2], e.exposure(), e.bounceScale, e.skyBounceScale, e.ambientIntensity);
+            for (int k = 0; k < 2; k++) {
+                auto& f = e.fog[k];
+                std::printf("brouillard %d : %s ray %.2f mie %.2f abs %.2f ém %.2f ; près %.2f (%.0f–%.0f m) loin %.2f (%.0f–%.0f m) ; hauteur %.2f / %.0f%s\n", k + 1,
+                            f.on ? "oui" : "non", f.rayD, f.mieD, f.absorbD, f.emitD, f.nearD, f.nfs, f.nfe, f.farD, f.ffs, f.ffe, f.falloff, f.yoff, f.heightMap ? " (sol)" : "");
+            }
         } else if (cmd == "foliage") {   // romfs préfixe-de-scène -> feuillage lu
             Game g(u8path(argv[2]));
             std::string st;

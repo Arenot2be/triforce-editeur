@@ -1,6 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+#define SCENE_SET 5
+#include "scene.glsl"
 // Sol : textures des matières (Tex/MaterialAlb, couche donnée par la table des matières de la scène), mélangées
 // d'après la carte des matières de chaque tuile (4 numéros et 4 poids par point), comme le nuanceur TerrainGround du
 // jeu (voir plus bas). Relief (Tex/MaterialCmb, mêmes couches) : R et G, une normale.
@@ -102,7 +104,11 @@ void main() {
     }
     // (sondes de la scène : teinte ambiante autour de la caméra)
     vec3 pa = probeAmbient(n);
-    if (pa.x >= 0.0 && gameLight()) { outColor = vec4(gameShade(col, ndl * sunTint() + pa, vec3(0.0)), 1.0); return; }
+    if (pa.x >= 0.0 && gameLight()) {
+        vec3 E = ndl * sunTint() * sunShadow(vW, n) + pa + localLights(vW, n, true);
+        outColor = vec4(sceneTone(fogApply(pow(max(col, vec3(0.0)), vec3(2.2)) * E, vW)), 1.0);
+        return;
+    }
     vec3 litc = pa.x < 0.0 ? vec3(lit) : lit * (0.45 * sunTint() + 0.55 * pa);
     outColor = vec4(gameTone(col * litc), 1.0);
 }

@@ -85,13 +85,13 @@ public:
     void free(VkTex& t);
     bool formatOk(VkFormat f) const;
     VkShaderModule shader(const uint32_t* code, size_t bytes);
+    void image(uint32_t w, uint32_t h, uint32_t mips, VkFormat f, VkSampleCountFlagBits s, VkImageUsageFlags u, VkImage& img, VkDeviceMemory& mem,
+               uint32_t layers = 1);
 
 private:
     GLFWwindow* win_ = nullptr;
     void createTargets();
     void destroyTargets();
-    void image(uint32_t w, uint32_t h, uint32_t mips, VkFormat f, VkSampleCountFlagBits s, VkImageUsageFlags u, VkImage& img, VkDeviceMemory& mem,
-               uint32_t layers = 1);
 };
 
 void check(VkResult r, const char* what);

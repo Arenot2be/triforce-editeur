@@ -183,3 +183,28 @@ hmax) + h1) ; couleur et relief mêlés par t.
   l'éditeur ; ambiance = lumières locales + renvoi × DirectionalLightBounceScale + ciel × (SkySunColorIntensity /
   BgDifIntensity) × SkyLightBounceScale ; couleur = ACES(albédo linéaire × éclairement × exposition), avec une
   correction en IL (clic droit sur « Tons du jeu »). Convention d'azimut supposée : depuis +Z vers +X.
+
+## Fondu des palettes, ombres, lumières locales, brouillard, ciel (éditeur)
+
+- **Fondu** : l'entrée de la table horaire commencée en dernier est fondue avec la précédente pendant son BlendTime
+  (minutes), selon sa courbe (« Hermit » : points 0 → 1, tangentes Data[1] et Data[3] ; IsBlendCurve faux : linéaire).
+  Éclairements (lux) mêlés en logarithme, EV et le reste linéairement. Soleil non fixé (champ) : course simple, levé à
+  6 h à l'est, 60° à midi, couché à 18 h, la lune en face la nuit (approximation : le jeu le calcule autrement).
+- **Ombres** : carte orthographique 4096² dans la direction du soleil, centrée sur le point visé (rayon 35 à 220 m selon
+  la distance de la caméra, calée sur les texels), modèles (avec découpe alpha), feuillage et terrain ; filtre 3 × 3.
+- **Lumières locales** : les 16 lumières ponctuelles de Bake/Light les plus proches du point visé, intensité lue en
+  candelas (I / d² lux ; cohérent avec la part A des sondes autour des lanternes), portée là où l'éclairement tombe
+  sous 0,002 unité. Les projecteurs (intensités de l'ordre de 10⁶) et les lumières rectangulaires ne sont pas encore
+  utilisés : leur unité n'est pas établie. La part A des sondes contient déjà ces lumières, cuites : l'éclairage direct
+  s'y ajoute.
+- **Brouillard** : deux couches de la palette, intégrées en 16 pas le long du rayon : densité près / loin selon la
+  distance, décroissance exp(−EHFFalloff · (y − y₀) / 10 m) au-dessus de y₀ = EHFYOffset (+ hauteur du sol au point visé
+  si UseHeightMap) ; diffusion Rayleigh (teinte λ⁻⁴, phase de Rayleigh) et de Mie (MieColor, Henyey-Greenstein avec
+  MieAnisotropy) éclairées par le soleil × VolumeFogMainLightScale et l'ambiance × VolumeFogProbeSkyLightScale ;
+  absorption AbsorptionColor × densité ; émission EmissionColor × densité × luminance du ciel. **Unité des densités
+  supposée** : 1,5·10⁻⁴ par mètre (avec elle, la couche 2 de Kokiri — densité 40 au-delà de 120 m — ferme l'horizon
+  de la forêt et la couche 1 reste légère) ; réglable (clic droit sur « Brouillard »). Zones (VolumeFogAreaParam) pas
+  encore appliquées : il faut les acteurs de zone de la carte.
+- **Ciel** : luminance moyenne des tables d'atmosphère pour la hauteur du soleil, × SkySunColorIntensity ; plus claire
+  et moins saturée vers l'horizon, terme de Rayleigh, halo de Mie (g = 0,8), disque du soleil ; puis le brouillard sur
+  3 km et la courbe de tons. Approximation : les blocs d'en-diffusion du skybin ne sont pas encore lus.

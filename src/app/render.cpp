@@ -17,7 +17,7 @@ VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs
     st[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, f, "main", nullptr};
     VkVertexInputBindingDescription bind{0, stride, VK_VERTEX_INPUT_RATE_VERTEX};
     VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-    vi.vertexBindingDescriptionCount = 1;
+    vi.vertexBindingDescriptionCount = stride ? 1 : 0;
     vi.pVertexBindingDescriptions = &bind;
     vi.vertexAttributeDescriptionCount = uint32_t(attrs.size());
     vi.pVertexAttributeDescriptions = attrs.data();
@@ -31,8 +31,9 @@ VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs
     rs.cullMode = cull ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
     rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rs.lineWidth = 1.f;
+    if (passFor_) { rs.depthBiasEnable = VK_TRUE; rs.depthBiasConstantFactor = 1.5f; rs.depthBiasSlopeFactor = 2.0f; }
     VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    ms.rasterizationSamples = vk.samples;
+    ms.rasterizationSamples = passFor_ ? VK_SAMPLE_COUNT_1_BIT : vk.samples;
     VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     ds.depthTestEnable = depthTest;
     ds.depthWriteEnable = depthWrite;
@@ -47,7 +48,7 @@ VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs
     cb.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     cb.alphaBlendOp = VK_BLEND_OP_ADD;
     VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    bs.attachmentCount = 1;
+    bs.attachmentCount = passFor_ ? 0 : 1;
     bs.pAttachments = &cb;
     VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dy{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
@@ -65,7 +66,7 @@ VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs
     pc.pColorBlendState = &bs;
     pc.pDynamicState = &dy;
     pc.layout = layout;
-    pc.renderPass = vk.pass;
+    pc.renderPass = passFor_ ? passFor_ : vk.pass;
     VkPipeline p;
     check(vkCreateGraphicsPipelines(vk.dev, VK_NULL_HANDLE, 1, &pc, nullptr, &p), "vkCreateGraphicsPipelines");
     vkDestroyShaderModule(vk.dev, v, nullptr);
@@ -74,8 +75,8 @@ VkPipeline Renderer::pipeline(const uint32_t* vs, size_t vsz, const uint32_t* fs
 }
 
 void Renderer::init() {
-    if (vk.props.limits.maxPushConstantsSize < sizeof(PC) || vk.props.limits.maxBoundDescriptorSets < 8)
-        throw Error(fmt("carte graphique trop limitée : %u octets de constantes (il en faut %zu), %u jeux de textures (il en faut 8)",
+    if (vk.props.limits.maxPushConstantsSize < sizeof(PC) || vk.props.limits.maxBoundDescriptorSets < 9)
+        throw Error(fmt("carte graphique trop limitée : %u octets de constantes (il en faut %zu), %u jeux de textures (il en faut 9)",
                         vk.props.limits.maxPushConstantsSize, sizeof(PC), vk.props.limits.maxBoundDescriptorSets));
     VkPushConstantRange r{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC)};
     VkPipelineLayoutCreateInfo lc{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
@@ -84,10 +85,11 @@ void Renderer::init() {
     lc.pushConstantRangeCount = 1;
     lc.pPushConstantRanges = &r;
     check(vkCreatePipelineLayout(vk.dev, &lc, nullptr, &layout), "vkCreatePipelineLayout");
+    initScene();
     {
-        VkDescriptorSetLayout sets[8] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout};
+        VkDescriptorSetLayout sets[9] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, sceneLayout};
         VkPipelineLayoutCreateInfo ml = lc;
-        ml.setLayoutCount = 8;
+        ml.setLayoutCount = 9;
         ml.pSetLayouts = sets;
         check(vkCreatePipelineLayout(vk.dev, &ml, nullptr, &meshLayout), "vkCreatePipelineLayout (modèles)");
         VkPipelineLayout keep = layout;
@@ -101,12 +103,19 @@ void Renderer::init() {
                                  {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 20},
                              {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}, {4, 0, VK_FORMAT_R32G32_SFLOAT, 48}, {5, 0, VK_FORMAT_R32G32_SFLOAT, 56}, {6, 0, VK_FORMAT_R32G32_SFLOAT, 64}},
                                  VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, false, false, true);
+        // (carte d'ombre : mêmes sommets, découpe alpha seulement)
+        passFor_ = shadowPass;
+        shadowMeshPipe = pipeline(SPV_MESH_VERT, sizeof SPV_MESH_VERT, SPV_SHADOW_FRAG, sizeof SPV_SHADOW_FRAG, 72,
+                                  {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 20},
+                                   {3, 0, VK_FORMAT_R32G32B32_SFLOAT, 36}, {4, 0, VK_FORMAT_R32G32_SFLOAT, 48}, {5, 0, VK_FORMAT_R32G32_SFLOAT, 56}, {6, 0, VK_FORMAT_R32G32_SFLOAT, 64}},
+                                  VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
+        passFor_ = VK_NULL_HANDLE;
         layout = keep;
     }
     {
-        VkDescriptorSetLayout sets[2] = {vk.texLayout, vk.texLayout};
+        VkDescriptorSetLayout sets[3] = {vk.texLayout, vk.texLayout, sceneLayout};
         VkPipelineLayoutCreateInfo wl = lc;
-        wl.setLayoutCount = 2;
+        wl.setLayoutCount = 3;
         wl.pSetLayouts = sets;
         check(vkCreatePipelineLayout(vk.dev, &wl, nullptr, &waterLayout), "vkCreatePipelineLayout (eau)");
         VkPipelineLayout keep = layout;
@@ -117,9 +126,9 @@ void Renderer::init() {
         layout = keep;
     }
     {
-        VkDescriptorSetLayout sets[5] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout};
+        VkDescriptorSetLayout sets[6] = {vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, vk.texLayout, sceneLayout};
         VkPipelineLayoutCreateInfo tl = lc;
-        tl.setLayoutCount = 5;
+        tl.setLayoutCount = 6;
         tl.pSetLayouts = sets;
         check(vkCreatePipelineLayout(vk.dev, &tl, nullptr, &terrLayout), "vkCreatePipelineLayout (terrain)");
         VkPipelineLayout keep = layout;
@@ -127,6 +136,22 @@ void Renderer::init() {
         terrPipe = pipeline(SPV_TERRAIN_VERT, sizeof SPV_TERRAIN_VERT, SPV_TERRAIN_FRAG, sizeof SPV_TERRAIN_FRAG, 40,
                             {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 28}},
                             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
+        passFor_ = shadowPass;
+        shadowTerrPipe = pipeline(SPV_TERRAIN_VERT, sizeof SPV_TERRAIN_VERT, SPV_SHADOW_T_FRAG, sizeof SPV_SHADOW_T_FRAG, 40,
+                                  {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 28}},
+                                  VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true, true, false);
+        passFor_ = VK_NULL_HANDLE;
+        layout = keep;
+    }
+    {
+        // (ciel : un triangle plein écran, sans sommets ni profondeur)
+        VkPipelineLayoutCreateInfo sl = lc;
+        sl.setLayoutCount = 1;
+        sl.pSetLayouts = &sceneLayout;
+        check(vkCreatePipelineLayout(vk.dev, &sl, nullptr, &skyLayout), "vkCreatePipelineLayout (ciel)");
+        VkPipelineLayout keep = layout;
+        layout = skyLayout;
+        skyPipe = pipeline(SPV_SKY_VERT, sizeof SPV_SKY_VERT, SPV_SKY_FRAG, sizeof SPV_SKY_FRAG, 0, {}, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, false, false, false);
         layout = keep;
     }
     {
@@ -251,7 +276,14 @@ void Renderer::setTerrain(const std::vector<TerrVert>& v, const std::vector<uint
 }
 
 void Renderer::bindMesh(VkCommandBuffer c) {
+    if (shadowMode) { vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMeshPipe); return; }
     vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipe);
+    vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, meshLayout, 8, 1, &sceneSet[vk.frame], 0, nullptr);
+}
+
+void Renderer::bindMeshBlend(VkCommandBuffer c) {
+    vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, meshBlendPipe);
+    vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, meshLayout, 8, 1, &sceneSet[vk.frame], 0, nullptr);
 }
 
 void Renderer::drawMesh(VkCommandBuffer c, const GpuMesh& g, const PC& pc, const std::vector<SubTex>& tex, bool translucent, const Bake* bake) {
@@ -315,6 +347,7 @@ void Renderer::drawWater(VkCommandBuffer c, const GpuMesh& g, const PC& pc, cons
         int flags = (sets[0] != white.set ? 1 : 0) | (sets[1] != white.set ? 2 : 0) | (i < signedNrm.size() && signedNrm[i] ? 4 : 0);
         p.scale[3] = float(flags);
         vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, waterLayout, 0, 2, sets, 0, nullptr);
+        vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, waterLayout, 2, 1, &sceneSet[vk.frame], 0, nullptr);
         vkCmdPushConstants(c, waterLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &p);
         vkCmdDrawIndexed(c, g.subs[i].count, 1, g.subs[i].start, 0, 0);
     }
@@ -322,7 +355,8 @@ void Renderer::drawWater(VkCommandBuffer c, const GpuMesh& g, const PC& pc, cons
 
 void Renderer::drawTerrain(VkCommandBuffer c, const PC& pc) {
     if (!terrCount) return;
-    vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, terrPipe);
+    vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMode ? shadowTerrPipe : terrPipe);
+    if (!shadowMode) vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, terrLayout, 5, 1, &sceneSet[vk.frame], 0, nullptr);
     if (!terrMat.set) setTerrainTable({});
     bool tex = terrLayers > 0 && terrIds.set && terrWts.set;
     bool relief = tex && terrRelief && terrCmbLayers == terrLayers && terrCmb.set;
@@ -391,6 +425,123 @@ void Renderer::drawFx(VkCommandBuffer c, const PC& pc) {
     }
 }
 
+void Renderer::initScene() {
+    // (jeu : tampon uniforme + carte d'ombre comparée)
+    VkDescriptorSetLayoutBinding b[2]{};
+    b[0] = {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+    b[1] = {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+    VkDescriptorSetLayoutCreateInfo dl{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    dl.bindingCount = 2;
+    dl.pBindings = b;
+    check(vkCreateDescriptorSetLayout(vk.dev, &dl, nullptr, &sceneLayout), "vkCreateDescriptorSetLayout (scène)");
+    VkDescriptorPoolSize ps[2] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, Vk::FRAMES}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, Vk::FRAMES}};
+    VkDescriptorPoolCreateInfo dp{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    dp.maxSets = Vk::FRAMES;
+    dp.poolSizeCount = 2;
+    dp.pPoolSizes = ps;
+    check(vkCreateDescriptorPool(vk.dev, &dp, nullptr, &scenePool), "vkCreateDescriptorPool (scène)");
+    // (carte d'ombre)
+    VkFormat df = VK_FORMAT_D32_SFLOAT;
+    vk.image(shadowSize, shadowSize, 1, df, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, shadowImg, shadowMem);
+    VkImageViewCreateInfo vc{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vc.image = shadowImg;
+    vc.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vc.format = df;
+    vc.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+    check(vkCreateImageView(vk.dev, &vc, nullptr, &shadowView), "vkCreateImageView (ombre)");
+    VkSamplerCreateInfo sc{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sc.magFilter = sc.minFilter = VK_FILTER_LINEAR;
+    sc.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sc.addressModeU = sc.addressModeV = sc.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    sc.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    sc.compareEnable = VK_TRUE;
+    sc.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    sc.maxLod = 0;
+    check(vkCreateSampler(vk.dev, &sc, nullptr, &shadowSampler), "vkCreateSampler (ombre)");
+    VkAttachmentDescription at{};
+    at.format = df;
+    at.samples = VK_SAMPLE_COUNT_1_BIT;
+    at.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    at.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    at.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    at.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    at.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    at.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    VkAttachmentReference ref{0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sp{};
+    sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sp.pDepthStencilAttachment = &ref;
+    VkSubpassDependency dep[2]{};
+    dep[0] = {VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_SHADER_READ_BIT,
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 0};
+    dep[1] = {0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 0};
+    VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    rp.attachmentCount = 1;
+    rp.pAttachments = &at;
+    rp.subpassCount = 1;
+    rp.pSubpasses = &sp;
+    rp.dependencyCount = 2;
+    rp.pDependencies = dep;
+    check(vkCreateRenderPass(vk.dev, &rp, nullptr, &shadowPass), "vkCreateRenderPass (ombre)");
+    VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    fb.renderPass = shadowPass;
+    fb.attachmentCount = 1;
+    fb.pAttachments = &shadowView;
+    fb.width = fb.height = shadowSize;
+    fb.layers = 1;
+    check(vkCreateFramebuffer(vk.dev, &fb, nullptr, &shadowFb), "vkCreateFramebuffer (ombre)");
+    // (première mise en place de la carte : effacée, prête à être lue)
+    vk.submitNow([&](VkCommandBuffer c) { beginShadow(c); endShadow(c); });
+    for (int f = 0; f < Vk::FRAMES; f++) {
+        sceneBuf[f] = vk.buffer(sizeof(SceneUbo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        SceneUbo z{};
+        std::memcpy(sceneBuf[f].map, &z, sizeof z);
+        VkDescriptorSetAllocateInfo da{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        da.descriptorPool = scenePool;
+        da.descriptorSetCount = 1;
+        da.pSetLayouts = &sceneLayout;
+        check(vkAllocateDescriptorSets(vk.dev, &da, &sceneSet[f]), "vkAllocateDescriptorSets (scène)");
+        VkDescriptorBufferInfo bi{sceneBuf[f].buf, 0, sizeof(SceneUbo)};
+        VkDescriptorImageInfo ii{shadowSampler, shadowView, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet w[2]{};
+        w[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, sceneSet[f], 0, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &bi, nullptr};
+        w[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, sceneSet[f], 1, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &ii, nullptr, nullptr};
+        vkUpdateDescriptorSets(vk.dev, 2, w, 0, nullptr);
+    }
+}
+
+void Renderer::setScene(const SceneUbo& u) { std::memcpy(sceneBuf[vk.frame].map, &u, sizeof u); }
+
+void Renderer::beginShadow(VkCommandBuffer c) {
+    VkClearValue cv{};
+    cv.depthStencil = {1.f, 0};
+    VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rb.renderPass = shadowPass;
+    rb.framebuffer = shadowFb;
+    rb.renderArea = {{0, 0}, {shadowSize, shadowSize}};
+    rb.clearValueCount = 1;
+    rb.pClearValues = &cv;
+    vkCmdBeginRenderPass(c, &rb, VK_SUBPASS_CONTENTS_INLINE);
+    VkViewport v{0, 0, float(shadowSize), float(shadowSize), 0, 1};
+    VkRect2D sc{{0, 0}, {shadowSize, shadowSize}};
+    vkCmdSetViewport(c, 0, 1, &v);
+    vkCmdSetScissor(c, 0, 1, &sc);
+    shadowMode = true;
+}
+
+void Renderer::endShadow(VkCommandBuffer c) {
+    vkCmdEndRenderPass(c);
+    shadowMode = false;
+}
+
+void Renderer::drawSky(VkCommandBuffer c) {
+    vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipe);
+    vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, skyLayout, 0, 1, &sceneSet[vk.frame], 0, nullptr);
+    vkCmdDraw(c, 3, 1, 0, 0);
+}
+
 void Renderer::destroy() {
     vkDeviceWaitIdle(vk.dev);
     for (auto& b : lineBuf_) vk.free(b);
@@ -405,7 +556,18 @@ void Renderer::destroy() {
     free(cube);
     vk.free(white);
     vk.free(whiteArr);
-    for (auto p : {waterPipe, meshPipe, meshBlendPipe, terrPipe, linePipe, lineTopPipe, fxPipe, fxAddPipe}) vkDestroyPipeline(vk.dev, p, nullptr);
+    for (auto p : {waterPipe, meshPipe, meshBlendPipe, terrPipe, linePipe, lineTopPipe, fxPipe, fxAddPipe, shadowMeshPipe, shadowTerrPipe, skyPipe})
+        vkDestroyPipeline(vk.dev, p, nullptr);
+    for (auto& b : sceneBuf) vk.free(b);
+    vkDestroyFramebuffer(vk.dev, shadowFb, nullptr);
+    vkDestroyRenderPass(vk.dev, shadowPass, nullptr);
+    vkDestroySampler(vk.dev, shadowSampler, nullptr);
+    vkDestroyImageView(vk.dev, shadowView, nullptr);
+    vkDestroyImage(vk.dev, shadowImg, nullptr);
+    vkFreeMemory(vk.dev, shadowMem, nullptr);
+    vkDestroyDescriptorPool(vk.dev, scenePool, nullptr);
+    vkDestroyDescriptorSetLayout(vk.dev, sceneLayout, nullptr);
+    vkDestroyPipelineLayout(vk.dev, skyLayout, nullptr);
     vkDestroyPipelineLayout(vk.dev, layout, nullptr);
     vkDestroyPipelineLayout(vk.dev, terrLayout, nullptr);
     vkDestroyPipelineLayout(vk.dev, waterLayout, nullptr);

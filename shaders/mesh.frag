@@ -1,6 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+#define SCENE_SET 8
+#include "scene.glsl"
 // Modèles : couleur du matériau, avec ses couches quand il en a :
 //  - texture de détail (« CmnTex_Map_DetailMap_… », bois…) répétée finement, qui module la couleur (0,5 = neutre) ;
 //  - seconde couleur (la mousse…) posée sur les surfaces tournées vers le haut (normale du modèle), avec un bord
@@ -138,7 +140,7 @@ void main() {
             // (ciel du jeu connu : éclairements dans les unités du jeu, soleil = 1 — soleil × N·L + sondes, comme la
             //  passe d'éclairage du nuanceur « model », sans les ombres)
             float ndl = hasN ? max(dot(n, L), 0.0) : abs(dot(n, L));
-            litc = ndl * sunTint() + pa;
+            litc = ndl * sunTint() * sunShadow(vW, n) + pa + localLights(vW, n, hasN);
         } else {
             float sun = hasN ? 0.45 * max(dot(n, L), 0.0) : 0.5 * abs(dot(n, L));
             litc = sun * sunTint() + 0.55 * pa;
@@ -153,7 +155,10 @@ void main() {
     float spec = (flags & 64) != 0 ? sm * pow(max(dot(n, H), 0.0), mix(6.0, 96.0, sm)) * 0.35 : 0.0;
     col += sunTint() * spec;
     bool phys = gameLight() && pa.x >= 0.0 && !lm;
-    if (phys) col = gameShade(c.rgb, lightc, sunTint() * spec * 0.25);
+    if (phys) {
+        vec3 lin = pow(max(c.rgb, vec3(0.0)), vec3(2.2)) * lightc + sunTint() * spec * 0.25 * sunShadow(vW, n);
+        col = sceneTone(fogApply(lin, vW));
+    }
     if (lm) {
         // (carte du jeu, deux canaux : r = lumière du ciel reçue (occlusion ambiante), g = soleil reçu (ombres portées))
         vec2 B = texture(uLight, vBake * pc.color.zw + pc.color.xy).rg;

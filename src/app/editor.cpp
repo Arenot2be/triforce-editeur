@@ -18,10 +18,10 @@ std::string Editor::scenePrefix() const { return bakePrefix(doc.path); }
 
 void Editor::applyEnv() {
     if (!game) return;
-    env = envLoad(*game, scenePrefix(), envHour, &envStatus);
+    env = envLoad(*game, scenePrefix(), envMinutes, &envStatus);
     // (soleil : direction forcée par la scène, sinon celle de l'éditeur ; azimut compté depuis +Z vers +X)
     float d[3] = {0.32152f, 0.91863f, 0.22966f};
-    if (env.ok && env.forcedSun) {
+    if (env.ok) {
         double el = env.sunEl / 57.29578, az = env.sunAz / 57.29578;
         d[0] = float(std::sin(az) * std::cos(el)); d[1] = float(std::sin(el)); d[2] = float(std::cos(az) * std::cos(el));
     }
@@ -660,12 +660,45 @@ static void boxLines(std::vector<LineVert>& out, const V3& p, const M3& R, const
 
 static const char* QUIET[] = {"Land", "EftLoc", "Tree", "Foliage", "Grass"};
 
+void Editor::renderShadow(VkCommandBuffer c) {
+    // (ombres du soleil : seulement en lumière du jeu — palette, sondes — et avec une carte ouverte)
+    shadowOn_ = false;
+    if (!hasMap || !showShadows || !showProbes || !env.ok || probes.size() == 0 || vpW <= 0 || vpH <= 0) return;
+    updateMatrices();
+    V3 sun(sunDir[0], sunDir[1], sunDir[2]);
+    if (sun.y < 0.02) return;
+    double R = cam.top ? std::clamp(cam.topSpan * 0.6, 30.0, 400.0) : std::clamp(cam.dist * 1.3, 35.0, 220.0);
+    shadowRadius_ = float(R);
+    V3 up = std::fabs(sun.y) > 0.99 ? V3(0, 0, 1) : V3(0, 1, 0);
+    V3 f = norm(sun * -1.0), s = norm(cross(f, up)), u = cross(s, f);
+    // (centre calé sur les texels de la carte : l'ombre ne scintille pas quand la caméra glisse)
+    V3 ctr = cam.target;
+    double tx = 2 * R / rend.shadowSize, cs = dot(ctr, s), cu = dot(ctr, u);
+    ctr = ctr + s * (std::round(cs / tx) * tx - cs) + u * (std::round(cu / tx) * tx - cu);
+    M4 view = lookAt(ctr + sun * 900.0, ctr, up);
+    lightVP_ = mul(ortho(-R, R, -R, R, 1, 2000), view);
+    rend.beginShadow(c);
+    inShadow_ = true;
+    render(c);
+    inShadow_ = false;
+    rend.endShadow(c);
+    shadowOn_ = true;
+}
+
 void Editor::render(VkCommandBuffer c) {
     updateMatrices();
-    VkViewport v{float(vpX), float(vpY + vpH), float(vpW), -float(vpH), 0, 1};
-    VkRect2D sc{{vpX, vpY}, {uint32_t(vpW), uint32_t(vpH)}};
-    vkCmdSetViewport(c, 0, 1, &v);
-    vkCmdSetScissor(c, 0, 1, &sc);
+    if (!inShadow_) {
+        VkViewport v{float(vpX), float(vpY + vpH), float(vpW), -float(vpH), 0, 1};
+        VkRect2D sc{{vpX, vpY}, {uint32_t(vpW), uint32_t(vpH)}};
+        vkCmdSetViewport(c, 0, 1, &v);
+        vkCmdSetScissor(c, 0, 1, &sc);
+    }
+    // (dans la carte d'ombre : seulement ce qui est à portée de l'ombre)
+    auto shadowFar = [&](const V3& p) {
+        if (!inShadow_) return false;
+        double dx = p.x - cam.target.x, dz = p.z - cam.target.z;
+        return dx * dx + dz * dz > double(shadowRadius_ + 40) * double(shadowRadius_ + 40);
+    };
     PC base{};
     base.m[2][3] = gameTone ? toneExposure : 0.f;   // (courbe de tons du jeu : hdr_compose d'AglShader)
     // (teinte du soleil d'après la transmittance de l'atmosphère du jeu, pour la hauteur du soleil de l'éditeur ;
@@ -700,7 +733,79 @@ void Editor::render(VkCommandBuffer c) {
         for (int i = 0; i < 12; i++) out.amb[i / 4][i % 4] = e[size_t(i)] * ambBoost;
     };
     probeAt(&probes, cam.target, base);   // (le point visé : au sol, plus juste que la caméra en hauteur)
-    std::memcpy(base.vp, vp.m, 64);
+    std::memcpy(base.vp, inShadow_ ? lightVP_.m : vp.m, 64);
+    if (!inShadow_) {
+        bool game = showProbes && env.ok && probes.size() > 0;
+        SceneUbo u{};
+        std::memcpy(u.lightVP, lightVP_.m, 64);
+        std::memcpy(u.invVP, invVp.m, 64);
+        V3 e = cam.eye();
+        u.eye[0] = float(e.x); u.eye[1] = float(e.y); u.eye[2] = float(e.z);
+        u.viewport[0] = float(vpX); u.viewport[1] = float(vpY); u.viewport[2] = float(vpW); u.viewport[3] = float(vpH);
+        u.shadowP[0] = game && shadowOn_ ? 1.f : 0.f;
+        u.shadowP[1] = 1.f / float(rend.shadowSize);
+        u.shadowP[2] = 1.f;
+        u.shadowP[3] = shadowRadius_ * 2.f / float(rend.shadowSize) * 1.5f;
+        for (int k = 0; k < 3; k++) u.sunDirS[k] = sunDir[k];
+        u.sunDirS[3] = game ? 1.f : 0.f;
+        if (game) {
+            for (int k = 0; k < 3; k++) u.sunCol[k] = env.sunColor[k] * env.sunLux / env.unit();
+            u.sunCol[3] = base.m[2][3];
+            // (luminance du ciel : tables d'atmosphère pour ce soleil, à l'intensité du ciel de la palette)
+            for (int k = 0; k < 3; k++) u.skyCol[k] = probes.sky[k] * env.skyLux / env.unit();
+            u.skyCol[3] = showFog && env.fogOn && !cam.top ? 1.f : 0.f;   // (pas de brouillard en vue de dessus : l'œil est très haut)
+            // (ambiance vers le haut au point visé : a + M·(0, 1, 0))
+            u.ambUp[0] = base.amb[0][0] + base.amb[1][1];
+            u.ambUp[1] = base.amb[0][1] + base.amb[2][1];
+            u.ambUp[2] = base.amb[0][2] + base.amb[1][3];
+            double gy = cam.target.y, h;
+            if (!tiles.empty() && groundAt(cam.target.x, cam.target.z, h)) gy = h;
+            u.ambUp[3] = float(gy);
+            // (brouillard de la palette : densités × k (unité supposée : 1,5·10⁻⁴ par mètre et par unité de densité),
+            //  hauteur en dizaines de mètres ; Rayleigh teinté en λ⁻⁴)
+            const float k = 1.5e-4f * fogDensity, ray[3] = {0.43f, 1.02f, 2.48f};
+            for (int l = 0; l < 2; l++) {
+                const FogLayer& F = env.fog[size_t(l)];
+                u.fogA[l][0] = F.nearD; u.fogA[l][1] = F.nfs; u.fogA[l][2] = F.nfe; u.fogA[l][3] = F.farD;
+                u.fogB[l][0] = F.ffs; u.fogB[l][1] = F.ffe; u.fogB[l][2] = F.falloff * 0.1f; u.fogB[l][3] = F.yoff;
+                for (int q = 0; q < 3; q++) {
+                    u.fogRay[l][q] = k * F.rayD * ray[q];
+                    u.fogMie[l][q] = k * F.mieD * F.mie[q];
+                    u.fogAbs[l][q] = k * F.absorbD * F.absorb[q];
+                    u.fogEmit[l][q] = k * F.emitD * F.emit[q];
+                }
+                u.fogRay[l][3] = F.heightMap ? 1.f : 0.f;
+                u.fogMie[l][3] = std::clamp(F.aniso, -0.95f, 0.95f);
+                u.fogAbs[l][3] = F.on ? 1.f : 0.f;
+            }
+            u.fogLight[0] = env.fogMainLight;
+            u.fogLight[1] = env.fogSkyLight;
+            // (lumières locales : les ponctuelles les plus proches du point visé, intensité en candelas)
+            if (showLights && !lights.empty()) {
+                std::vector<std::pair<double, size_t>> near;
+                for (size_t i = 0; i < lights.size(); i++) {
+                    if (lights[i].kind != SceneLight::Point) continue;
+                    V3 lp(lights[i].p[0], lights[i].p[1], lights[i].p[2]);
+                    double d = len(lp - cam.target);
+                    if (d < 120) near.push_back({d, i});
+                }
+                std::sort(near.begin(), near.end());
+                int n = 0;
+                for (auto& [d, i] : near) {
+                    if (n >= 16) break;
+                    auto& L = lights[i];
+                    float I = L.intensity / env.unit();
+                    for (int q = 0; q < 3; q++) { u.lightPos[n][q] = L.p[q]; u.lightCol[n][q] = L.col[q] * I; }
+                    u.lightPos[n][3] = std::clamp(std::sqrt(I / 0.002f), 1.5f, 40.f);
+                    u.lightCol[n][3] = -2.f;
+                    n++;
+                }
+                u.lightN[0] = float(n);
+            }
+        }
+        rend.setScene(u);
+        if (game && showSky && sky.ok && !cam.top) rend.drawSky(c);
+    }
     base.scale[0] = base.scale[1] = base.scale[2] = 1;
     if (showTerrain) rend.drawTerrain(c, base);
     rend.lines.clear();
@@ -747,6 +852,7 @@ void Editor::render(VkCommandBuffer c) {
             for (auto& r : L.recs) {
                 if (!posKey(r->value) || !visible(*r)) continue;
                 V3 p = posOf(*r), ro = rotOf(*r), s = scaleOf(*r);
+                if (shadowFar(p)) continue;
                 std::string name = nameOf(r->value);
                 PC pc = base;
                 std::memset(pc.amb, 0, sizeof pc.amb);
@@ -760,7 +866,7 @@ void Editor::render(VkCommandBuffer c) {
                 // (effets de particules : dessinés en plus de la boîte, s'ils sont assez près)
                 ModelSlot* ms = showModels && !name.empty() ? model(name) : nullptr;
                 // (effets permanents : emplacements EftLoc, et objets dont l'effet tourne en continu — insectes, bougies…)
-                if (showEffects && showModels && !name.empty() && len(p - eye) < 220 && rend.fx.size() < 120000) {
+                if (!inShadow_ && showEffects && showModels && !name.empty() && len(p - eye) < 220 && rend.fx.size() < 120000) {
                     bool place = name.rfind("EftLoc", 0) == 0;
                     if (place || len(p - eye) < 120)
                         if (FxSlot* fs = effect(name); fs && fs->ready && fs->info.ambient && (place || !fs->info.file.empty()))
@@ -805,8 +911,9 @@ void Editor::render(VkCommandBuffer c) {
                                 }
                             }
                     rend.drawMesh(c, *g, pc, sets, false, bkp);
-                    if (g->translucent) late.push_back({g, pc, sets});
+                    if (g->translucent && !inShadow_) late.push_back({g, pc, sets});
                 } else {
+                    if (inShadow_) continue;   // (les boîtes des objets sans modèle ne font pas d'ombre)
                     bool quiet = false;
                     for (auto q : QUIET) if (catOf(name) == q) quiet = true;
                     if (quiet && !(ms && ms->st == ModelSlot::None)) { /* (en attente du modèle) */ }
@@ -848,17 +955,18 @@ void Editor::render(VkCommandBuffer c) {
             }
             for (size_t k = 0; k < f.posRot.size(); k++) {
                 const V3& p = f.posRot[k].first;
-                if (len(p - eye) > 180) continue;
+                if (len(p - eye) > 180 || shadowFar(p)) continue;
                 PC pc = base;
                 pc.pos[0] = float(p.x); pc.pos[1] = float(p.y); pc.pos[2] = float(p.z); pc.pos[3] = 0;
                 pc.rot[0] = float(f.posRot[k].second.x); pc.rot[1] = float(f.posRot[k].second.y); pc.rot[2] = float(f.posRot[k].second.z);
                 pc.scale[0] = pc.scale[1] = pc.scale[2] = f.scale[k];
                 pc.color[0] = pc.color[1] = pc.color[2] = 0.72f; pc.color[3] = 1;
                 rend.drawMesh(c, *g, pc, sets, false, nullptr);
-                if (g->translucent) late.push_back({g, pc, sets});
+                if (g->translucent && !inShadow_) late.push_back({g, pc, sets});
             }
         }
     }
+    if (inShadow_) return;
     if (hasMap && showGround && showModels && !ground.empty()) emitGround(cam.eye(), camR, camU);
     if (hasMap && showLights && !lights.empty()) emitLights(cam.eye(), camR, camU, fxTime);
     if (!late.empty()) {
@@ -888,7 +996,7 @@ void Editor::render(VkCommandBuffer c) {
             }
             rend.drawWater(c, *l.g, l.pc, nrm, flow, sgn, time);
         }
-        vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, rend.meshBlendPipe);
+        rend.bindMeshBlend(c);
         for (auto& l : late) rend.drawMesh(c, *l.g, l.pc, l.tex, true);
     }
     rend.drawFx(c, base);

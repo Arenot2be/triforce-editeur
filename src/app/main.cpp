@@ -152,6 +152,7 @@ int run(int argc, char** argv) {
             VkCommandBuffer c = vk.beginFrame(w, h);
             if (c) {
                 float clear[4] = {0.10f, 0.13f, 0.17f, 1};
+                ed.renderShadow(c);
                 vk.beginPass(c, clear);
                 ed.render(c);
                 VkViewport v{0, 0, float(vk.extent.width), float(vk.extent.height), 0, 1};
