@@ -826,6 +826,13 @@ void Editor::render(VkCommandBuffer c) {
             u.skyG[3] = sky.ok ? 1.f : 0.f;
         }
         if (game && agl.shadowOk) { u.shadowF[0] = agl.shadowFadeStart; u.shadowF[1] = agl.shadowFadeEnd; }
+        if (game) {
+            // (mêmes échelles que les sondes ; skyCol contient déjà l'intensité du ciel de la palette)
+            u.giScale[0] = env.skyBounceScale * env.ambientIntensity * ambBoost;
+            u.giScale[1] = env.bounceScale * env.sunLux / env.unit() * env.ambientIntensity * ambBoost;
+            u.giScale[2] = env.ambientIntensity * ambBoost;
+            u.giScale[3] = 1.f;
+        }
         rend.setScene(u);
         if (game && showSky && sky.ok && !cam.top) rend.drawSky(c);
     }
@@ -2096,9 +2103,24 @@ void Editor::setTerrain(const std::string& scene) {
                         float h = t.h[size_t(y * n + x)];
                         float px = t.cx - t.side / 2 + t.side * x / (n - 1), pz = t.cz - t.side / 2 + t.side * y / (n - 1);
                         auto c = matColor(t.mat[size_t(y * n + x)], std::isfinite(h) ? h : 0);
-                        vv->push_back({{px, std::isfinite(h) ? h : 0.f, pz}, {c[0], c[1], c[2], float(n)},
-                                       {float(x) / float(n - 1), float(y) / float(n - 1), float(ti)},
-                                       bakes->empty() ? 1.f : terrainBakeAo(*bakes, px, pz)});
+                        TerrVert tv{{px, std::isfinite(h) ? h : 0.f, pz}, {c[0], c[1], c[2], float(n)},
+                                    {float(x) / float(n - 1), float(y) / float(n - 1), float(ti)}};
+                        if (!bakes->empty()) {
+                            tv.ao = terrainBakeAo(*bakes, px, pz);
+                            // (normale du sommet par différences des hauteurs voisines)
+                            auto hh = [&](int xx, int yy) {
+                                float v = t.h[size_t(std::clamp(yy, 0, n - 1) * n + std::clamp(xx, 0, n - 1))];
+                                return std::isfinite(v) ? v : (std::isfinite(h) ? h : 0.f);
+                            };
+                            float step = t.side / float(n - 1);
+                            float nx = -(hh(x + 1, y) - hh(x - 1, y)) / (2 * step), nz = -(hh(x, y + 1) - hh(x, y - 1)) / (2 * step);
+                            float nl = std::sqrt(nx * nx + 1 + nz * nz), nn[3] = {nx / nl, 1 / nl, nz / nl}, o[7];
+                            if (terrainBakeGi(*bakes, px, pz, nn, o)) {
+                                tv.gi[0] = o[0]; tv.gi[1] = o[1]; tv.gi[2] = o[2]; tv.gi[3] = o[3];
+                                tv.ga[0] = o[4]; tv.ga[1] = o[5]; tv.ga[2] = o[6];
+                            }
+                        }
+                        vv->push_back(tv);
                     }
                 for (int y = 0; y + 1 < n; y++)
                     for (int x = 0; x + 1 < n; x++) {
@@ -2123,7 +2145,7 @@ void Editor::setTerrain(const std::string& scene) {
             terrainMatTable = table->size();
             terrainStatus = fmt("%zu tuiles", tiles.size());
             if (*subCount) terrainStatus += fmt(" (variante %s_sub)", scene.c_str());
-            if (*bakeCount) terrainStatus += fmt(", ombre ambiante précalculée sur %zu tuiles", *bakeCount);
+            if (*bakeCount) terrainStatus += fmt(", éclairage précalculé (AO, GI) sur %zu tuiles", *bakeCount);
         };
     });
 }

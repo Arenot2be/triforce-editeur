@@ -28,6 +28,7 @@ layout(std140, set = SCENE_SET, binding = 0) uniform Scene {
     vec4 skyK;         // (rgb : part de la diffusion multiple (tables du jeu / diffusion simple) ; w : soleil hors atmosphère)
     vec4 skyG;         // (couleur du sol ; w : ciel physique)
     vec4 shadowF;      // (fondu des ombres avec la distance : début, fin (m))
+    vec4 giScale;      // (lumière précalculée du terrain : échelles du ciel, du soleil renvoyé, des lumières locales ; w : active)
 } S;
 layout(set = SCENE_SET, binding = 1) uniform sampler2DShadow uShadow;
 

@@ -1,3 +1,4 @@
+#include <cstring>
 #include "core/terrain.hpp"
 
 #include <algorithm>
@@ -301,6 +302,30 @@ std::vector<TerrainBake> terrainBakes(const Game& game, const std::string& scene
                     bc4Block(&data[o], v);   // (canal R du BC5 : les 8 premiers octets)
                     for (size_t t = 0; t < 16; t++) tb.ao[(by * 4 + t / 4) * 260 + bx * 4 + t % 4] = v[t];
                 }
+            // (lumière renvoyée précalculée, même tuile)
+            std::string an = f.filename().string();
+            fs::path gf = f.parent_path() / (an.substr(0, an.size() - std::string("bake_ao.extm").size()) + "bake_gi.extm");
+            if (fs::is_regular_file(gf, ec)) {
+                try {
+                    Bytes gd;
+                    std::vector<std::pair<size_t, size_t>> gb;
+                    tarb(readFile(gf), gd, gb);
+                    if (!gb.empty() && gb[0].second >= 6 * 139264) {
+                        tb.gi.assign(size_t(260 * 260 * 18), 0.f);
+                        float px[48];
+                        for (size_t L = 0; L < 6; L++)
+                            for (size_t by = 0; by < W; by++)
+                                for (size_t bx = 0; bx < W; bx++) {
+                                    size_t o = gb[0].first + L * 139264 + gobAddr(bx * 16, by, wg, bh);
+                                    if (o + 16 > gd.size()) continue;
+                                    bc6hBlock(&gd[o], true, px);
+                                    for (size_t t = 0; t < 16; t++)
+                                        for (size_t c = 0; c < 3; c++)
+                                            tb.gi[((by * 4 + t / 4) * 260 + bx * 4 + t % 4) * 18 + L * 3 + c] = px[t * 3 + c];
+                                }
+                    }
+                } catch (...) { tb.gi.clear(); }
+            }
             out.push_back(std::move(tb));
         } catch (...) {}
     }
@@ -323,6 +348,163 @@ float terrainBakeAo(const std::vector<TerrainBake>& bakes, float x, float z) {
     float fx = std::clamp(u - float(x0), 0.f, 1.f), fy = std::clamp(v - float(y0), 0.f, 1.f);
     auto at = [&](int xx, int yy) { return float(best->ao[size_t(yy) * 260 + size_t(xx)]) / 255.f; };
     return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
+}
+
+// ---- BC6H ----
+namespace {
+struct Bc6Field { int f, hi, lo; };   // (f : 0..11 = r0..r3, g0..g3, b0..b3 ; hi < lo : bits rangés à l'envers)
+struct Bc6Mode { int code, regions; bool transformed; int epb, delta[3]; std::vector<Bc6Field> fields; };
+std::vector<Bc6Field> bc6Layout(const char* s) {
+    std::vector<Bc6Field> out;
+    std::string t(s);
+    size_t i = 0;
+    while (i < t.size()) {
+        size_t j = t.find(',', i);
+        if (j == std::string::npos) j = t.size();
+        std::string tok = t.substr(i, j - i);
+        int c = tok[0] == 'r' ? 0 : tok[0] == 'g' ? 1 : 2, k = tok[1] - '0';
+        size_t br = tok.find('['), co = tok.find(':');
+        int a = std::stoi(tok.substr(br + 1)), bb = co == std::string::npos ? a : std::stoi(tok.substr(co + 1));
+        out.push_back({c * 4 + k, a, bb});
+        i = j + 1;
+    }
+    return out;
+}
+const std::vector<Bc6Mode>& bc6Modes() {
+    static const std::vector<Bc6Mode> m = {
+        {0x00, 2, true, 10, {5, 5, 5}, bc6Layout("g2[4],b2[4],b3[4],r0[9:0],g0[9:0],b0[9:0],r1[4:0],g3[4],g2[3:0],g1[4:0],b3[0],g3[3:0],b1[4:0],b3[1],b2[3:0],r2[4:0],b3[2],r3[4:0],b3[3]")},
+        {0x01, 2, true, 7, {6, 6, 6}, bc6Layout("g2[5],g3[4],g3[5],r0[6:0],b3[0],b3[1],b2[4],g0[6:0],b2[5],b3[2],g2[4],b0[6:0],b3[3],b3[5],b3[4],r1[5:0],g2[3:0],g1[5:0],g3[3:0],b1[5:0],b2[3:0],r2[5:0],r3[5:0]")},
+        {0x02, 2, true, 11, {5, 4, 4}, bc6Layout("r0[9:0],g0[9:0],b0[9:0],r1[4:0],r0[10],g2[3:0],g1[3:0],g0[10],b3[0],g3[3:0],b1[3:0],b0[10],b3[1],b2[3:0],r2[4:0],b3[2],r3[4:0],b3[3]")},
+        {0x06, 2, true, 11, {4, 5, 4}, bc6Layout("r0[9:0],g0[9:0],b0[9:0],r1[3:0],r0[10],g3[4],g2[3:0],g1[4:0],g0[10],g3[3:0],b1[3:0],b0[10],b3[1],b2[3:0],r2[3:0],b3[0],b3[2],r3[3:0],g2[4],b3[3]")},
+        {0x0A, 2, true, 11, {4, 4, 5}, bc6Layout("r0[9:0],g0[9:0],b0[9:0],r1[3:0],r0[10],b2[4],g2[3:0],g1[3:0],g0[10],b3[0],g3[3:0],b1[4:0],b0[10],b2[3:0],r2[3:0],b3[1],b3[2],r3[3:0],b3[4],b3[3]")},
+        {0x0E, 2, true, 9, {5, 5, 5}, bc6Layout("r0[8:0],b2[4],g0[8:0],g2[4],b0[8:0],b3[4],r1[4:0],g3[4],g2[3:0],g1[4:0],b3[0],g3[3:0],b1[4:0],b3[1],b2[3:0],r2[4:0],b3[2],r3[4:0],b3[3]")},
+        {0x12, 2, true, 8, {6, 5, 5}, bc6Layout("r0[7:0],g3[4],b2[4],g0[7:0],b3[2],g2[4],b0[7:0],b3[3],b3[4],r1[5:0],g2[3:0],g1[4:0],b3[0],g3[3:0],b1[4:0],b3[1],b2[3:0],r2[5:0],r3[5:0]")},
+        {0x16, 2, true, 8, {5, 6, 5}, bc6Layout("r0[7:0],b3[0],b2[4],g0[7:0],g2[5],g2[4],b0[7:0],g3[5],b3[4],r1[4:0],g3[4],g2[3:0],g1[5:0],g3[3:0],b1[4:0],b3[1],b2[3:0],r2[4:0],b3[2],r3[4:0],b3[3]")},
+        {0x1A, 2, true, 8, {5, 5, 6}, bc6Layout("r0[7:0],b3[1],b2[4],g0[7:0],b2[5],g2[4],b0[7:0],b3[5],b3[4],r1[4:0],g3[4],g2[3:0],g1[4:0],b3[0],g3[3:0],b1[5:0],b2[3:0],r2[4:0],b3[2],r3[4:0],b3[3]")},
+        {0x1E, 2, false, 6, {6, 6, 6}, bc6Layout("r0[5:0],g3[4],b3[0],b3[1],b2[4],g0[5:0],g2[5],b2[5],b3[2],g2[4],b0[5:0],g3[5],b3[3],b3[5],b3[4],r1[5:0],g2[3:0],g1[5:0],g3[3:0],b1[5:0],b2[3:0],r2[5:0],r3[5:0]")},
+        {0x03, 1, false, 10, {10, 10, 10}, bc6Layout("r0[9:0],g0[9:0],b0[9:0],r1[9:0],g1[9:0],b1[9:0]")},
+        {0x07, 1, true, 11, {9, 9, 9}, bc6Layout("r0[9:0],g0[9:0],b0[9:0],r1[8:0],r0[10],g1[8:0],g0[10],b1[8:0],b0[10]")},
+        {0x0B, 1, true, 12, {8, 8, 8}, bc6Layout("r0[9:0],g0[9:0],b0[9:0],r1[7:0],r0[10:11],g1[7:0],g0[10:11],b1[7:0],b0[10:11]")},
+        {0x0F, 1, true, 16, {4, 4, 4}, bc6Layout("r0[9:0],g0[9:0],b0[9:0],r1[3:0],r0[10:15],g1[3:0],g0[10:15],b1[3:0],b0[10:15]")},
+    };
+    return m;
+}
+const uint16_t kP2[32] = {0xCCCC, 0x8888, 0xEEEE, 0xECC8, 0xC880, 0xFEEC, 0xFEC8, 0xEC80, 0xC800, 0xFFEC, 0xFE80, 0xE800, 0xFFE8, 0xFF00, 0xFFF0, 0xF000,
+                          0xF710, 0x008E, 0x7100, 0x08CE, 0x008C, 0x7310, 0x3100, 0x8CCE, 0x088C, 0x3110, 0x6666, 0x366C, 0x17E8, 0x0FF0, 0x718E, 0x399C};
+const uint8_t kA2[32] = {15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 2, 8, 2, 2, 8, 8, 15, 2, 8, 2, 2, 8, 8, 2, 2};
+const int kW3[8] = {0, 9, 18, 27, 37, 46, 55, 64}, kW4[16] = {0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};
+int sext(int x, int n) { return (x & (1 << (n - 1))) ? x - (1 << n) : x; }
+float halfToFloat(uint16_t h) {
+    uint32_t s = uint32_t(h & 0x8000) << 16, e = (h >> 10) & 31, m = h & 0x3FF, f;
+    if (e == 0) {
+        if (m == 0) f = s;
+        else { e = 127 - 15 + 1; while (!(m & 0x400)) { m <<= 1; e--; } m &= 0x3FF; f = s | (e << 23) | (m << 13); }
+    } else if (e == 31) f = s | 0x7F800000 | (m << 13);
+    else f = s | ((e + 127 - 15) << 23) | (m << 13);
+    float r;
+    std::memcpy(&r, &f, 4);
+    return r;
+}
+}  // namespace
+
+void bc6hBlock(const uint8_t* blk, bool sg, float out[48]) {
+    uint64_t lo, hi;
+    std::memcpy(&lo, blk, 8);
+    std::memcpy(&hi, blk + 8, 8);
+    int pos = 0;
+    auto rd = [&](int n) -> uint32_t {
+        uint32_t r = 0;
+        for (int i = 0; i < n; i++, pos++) {
+            uint64_t bit = pos < 64 ? (lo >> pos) & 1 : (hi >> (pos - 64)) & 1;
+            r |= uint32_t(bit) << i;
+        }
+        return r;
+    };
+    for (int i = 0; i < 48; i++) out[i] = 0;
+    int code = int(rd(2));
+    if (code >= 2) code |= int(rd(3)) << 2;
+    const Bc6Mode* md = nullptr;
+    for (auto& m : bc6Modes()) if (m.code == code) { md = &m; break; }
+    if (!md) return;
+    int E[12] = {};
+    for (auto& f : md->fields) {
+        if (f.hi >= f.lo) E[f.f] |= int(rd(f.hi - f.lo + 1)) << f.lo;
+        else {
+            int n = f.lo - f.hi + 1, x = int(rd(n)), r = 0;
+            for (int i = 0; i < n; i++) r |= ((x >> i) & 1) << (n - 1 - i);
+            E[f.f] |= r << f.hi;
+        }
+    }
+    int part = md->regions == 2 ? int(rd(5)) : 0;
+    int epb = md->epb, mask = (1 << epb) - 1, ne = 2 * md->regions;
+    int ep[3][4];
+    for (int c = 0; c < 3; c++) {
+        int w = E[c * 4] & mask;
+        int v[4] = {w, 0, 0, 0};
+        for (int k = 1; k < ne; k++) {
+            int x = E[c * 4 + k];
+            int d = md->delta[c];
+            if (md->transformed) x = (w + sext(x & ((1 << d) - 1), d)) & mask;
+            v[k] = x & mask;
+        }
+        for (int k = 0; k < ne; k++) {
+            int x = v[k], q;
+            if (sg) {
+                x = sext(x, epb);
+                if (epb >= 16) q = x;
+                else {
+                    bool neg = x < 0;
+                    int a = neg ? -x : x;
+                    q = a == 0 ? 0 : a >= (1 << (epb - 1)) - 1 ? 0x7FFF : ((a << 15) + 0x4000) >> (epb - 1);
+                    if (neg) q = -q;
+                }
+            } else {
+                q = epb >= 15 ? x : x == 0 ? 0 : x == mask ? 0xFFFF : ((x << 16) + 0x8000) >> epb;
+            }
+            ep[c][k] = q;
+        }
+    }
+    for (int t = 0; t < 16; t++) {
+        int sub = 0, w;
+        if (md->regions == 1) w = kW4[rd(t == 0 ? 3 : 4)];
+        else {
+            sub = (kP2[part] >> t) & 1;
+            w = kW3[rd((t == 0 || t == kA2[part]) ? 2 : 3)];
+        }
+        for (int c = 0; c < 3; c++) {
+            int q = ((64 - w) * ep[c][2 * sub] + w * ep[c][2 * sub + 1] + 32) >> 6;
+            uint16_t h;
+            if (sg) h = q < 0 ? uint16_t(0x8000 | ((((-q) * 31) >> 5) & 0x7FFF)) : uint16_t(((q * 31) >> 5) & 0x7FFF);
+            else h = uint16_t((q * 31) >> 6);
+            out[t * 3 + c] = halfToFloat(h);
+        }
+    }
+}
+
+bool terrainBakeGi(const std::vector<TerrainBake>& bakes, float x, float z, const float n[3], float out[7]) {
+    const TerrainBake* best = nullptr;
+    for (auto& b : bakes)
+        if (!b.gi.empty() && std::fabs(x - b.cx) <= b.side / 2 && std::fabs(z - b.cz) <= b.side / 2 && (!best || b.side < best->side)) best = &b;
+    if (!best) return false;
+    float u = std::clamp(2.f + (x - (best->cx - best->side / 2)) / best->side * 256.f - 0.5f, 10.f, 249.f);
+    float v = std::clamp(2.f + (z - (best->cz - best->side / 2)) / best->side * 256.f - 0.5f, 10.f, 249.f);
+    int x0 = int(u), y0 = int(v);
+    float fx = u - float(x0), fy = v - float(y0);
+    float g[18];
+    for (int k = 0; k < 18; k++) {
+        auto at = [&](int xx, int yy) { return best->gi[(size_t(yy) * 260 + size_t(xx)) * 18 + size_t(k)]; };
+        g[k] = (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
+    }
+    // (direction rangée (r = y, g = x, b = z) = L1 / L0 / 2 ; E = 0,886·L0·(1 + 1,155·2·d·n))
+    auto lobe = [&](int l) {
+        float d = g[l * 3 + 1] * n[0] + g[l * 3 + 0] * n[1] + g[l * 3 + 2] * n[2];
+        return std::max(0.f, 0.886f * (1.f + 2.31f * d));
+    };
+    float fs = lobe(3), fb = lobe(5), fa = lobe(1);
+    out[0] = std::max(0.f, g[6]) * fs;
+    for (int c = 0; c < 3; c++) out[1 + c] = std::max(0.f, g[12 + c]) * fb;
+    for (int c = 0; c < 3; c++) out[4 + c] = std::max(0.f, g[0 + c]) * fa;
+    return true;
 }
 
 }  // namespace te

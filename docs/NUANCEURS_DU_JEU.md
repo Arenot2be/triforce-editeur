@@ -252,6 +252,14 @@ hmax) + h1) ; couleur et relief mêlés par t.
   tuile occupe à peu près les texels 2 à 258 ; les dix premières rangées et les colonnes au-delà de 250 portent des
   motifs en tirets (bordure) : l'éditeur ne lit que l'intérieur. Appliqué : multiplie l'ambiance (sondes) du terrain,
   tuile précalculée la plus fine qui couvre chaque sommet, interpolation bilinéaire.
-- **GI** : six textures de même taille et même rangement, en BC6H (blocs de 16 octets aux modes 1, 11, 12, 13, 14 ;
-  ex. bloc constant de mode 13 ≈ 0,00023) — sans doute un cube d'ambiance (±X, ±Y, ±Z). Pas encore appliqué : il faut
-  le décodage BC6H et l'échelle par rapport aux sondes.
+- **GI** : six textures de même taille et même rangement, en **BC6H signé** (code 09 ; décodeur dans terrain.cpp,
+  vérifié : images cohérentes, mêmes ordres de grandeur que les sondes). Par texel 18 valeurs, comme une sonde :
+  0 lumières locales L0 rgb, 1 leur direction ; 2 visibilité du ciel L0 (rgb égaux, ~1,7 à découvert — 1,77 pour un
+  hémisphère dégagé, comme h3 des sondes : médiane 1,31 au sol contre 1,33 pour les sondes les plus basses) ; 3 sa
+  direction ; 4 soleil renvoyé L0 rgb (jaune) ; 5 sa direction. Direction rangée (r = y, g = x, b = z) = L1 / L0 / 2 :
+  ciel ≈ (0,445 ; 0 ; 0) à découvert, renvoi ≈ (−0,43 ; 0 ; 0) (il vient d'en bas). Éclairement pour une normale n :
+  0,886·L0·(1 + 2,31·d·n) — à découvert, vers le haut, le facteur du ciel vaut 3,05 ≈ π, comme il se doit. Le sens
+  des composantes x et z (g et b) n'a pas pu être vérifié sur les pentes.
+- Appliqué : chaque sommet du terrain reçoit ces trois facteurs (normale tirée des hauteurs voisines) depuis la tuile
+  précalculée la plus fine ; le nuanceur les combine avec la luminance du ciel et les échelles de la palette (comme
+  les sondes), × l'ombre ambiante ; les sondes autour du point visé ne servent plus qu'aux tuiles sans données.

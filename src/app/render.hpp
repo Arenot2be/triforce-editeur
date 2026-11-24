@@ -27,7 +27,7 @@ struct SceneUbo {
     float lightVP[16], invVP[16], eye[4], viewport[4], shadowP[4], sunDirS[4], sunCol[4], skyCol[4], ambUp[4];
     float fogA[2][4], fogB[2][4], fogRay[2][4], fogMie[2][4], fogAbs[2][4], fogEmit[2][4], fogLight[4], lightN[4];
     float lightPos[16][4], lightCol[16][4], lightDir[16][4];
-    float skyR[4], skyM[4], skyX[4], skyK[4], skyG[4], shadowF[4];
+    float skyR[4], skyM[4], skyX[4], skyK[4], skyG[4], shadowF[4], giScale[4];
 };
 
 struct GpuMesh {
@@ -46,7 +46,12 @@ struct LineVert { float p[3]; float c[4]; };
 struct FxVert { float p[3]; float uv[2]; float c[4]; };
 // (une suite de particules d'un même effet : sa texture, sa forme — voir shaders/fx.frag — et son mélange)
 struct FxBatch { VkDescriptorSet tex = VK_NULL_HANDLE; int mode = 0; bool additive = false; uint32_t first = 0, count = 0; };
-struct TerrVert { float p[3]; float c[4]; float t[3]; float ao = 1; };   // (ao : ombre ambiante précalculée du jeu)   // (c.a : côté de la grille de la tuile ; t : place dans la tuile, n° de tuile)
+struct TerrVert {
+    float p[3]; float c[4]; float t[3];
+    float ao = 1;                         // (ombre ambiante précalculée du jeu)
+    float gi[4] = {-1, 0, 0, 0};          // (lumière précalculée du jeu : facteur du ciel (−1 : aucune), soleil renvoyé rgb)
+    float ga[3] = {0, 0, 0};              // (… lumières locales rgb)
+};   // (c.a : côté de la grille de la tuile ; t : place dans la tuile, n° de tuile)
 
 class Renderer {
 public:

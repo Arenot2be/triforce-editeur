@@ -17,6 +17,8 @@ layout(location = 0) in vec4 vCol;
 layout(location = 1) in vec3 vW;
 layout(location = 2) in vec3 vTc;
 layout(location = 3) in float vAo;
+layout(location = 4) in vec4 vGi;
+layout(location = 5) in vec3 vGa;
 layout(location = 0) out vec4 outColor;
 
 // (comme le nuanceur du jeu, Shader/TerrainGround : les matières des 4 points voisins sont pondérées
@@ -106,7 +108,12 @@ void main() {
     // (sondes de la scène : teinte ambiante autour de la caméra)
     vec3 pa = probeAmbient(n);
     if (pa.x >= 0.0 && gameLight()) {
-        vec3 E = ndl * sunTint() * sunShadow(vW, n) + pa * vAo + localLights(vW, n, true);
+        // (lumière précalculée du terrain quand elle existe : ciel × visibilité, soleil renvoyé, lumières locales, aux
+        //  échelles de la palette ; sinon les sondes autour du point visé)
+        vec3 amb = pa;
+        if (vGi.x >= 0.0 && S.giScale.w > 0.5)
+            amb = vGi.x * S.skyCol.rgb * S.giScale.x + vGi.yzw * S.giScale.y + vGa * S.giScale.z;
+        vec3 E = ndl * sunTint() * sunShadow(vW, n) + amb * vAo + localLights(vW, n, true);
         outColor = vec4(sceneTone(fogApply(pow(max(col, vec3(0.0)), vec3(2.2)) * E, vW)), 1.0);
         return;
     }

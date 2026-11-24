@@ -118,7 +118,16 @@ int main(int argc, char** argv) {
             for (auto& b : bk) {
                 double sum = 0; int lo = 255;
                 for (size_t y = 2; y < 258; y++) for (size_t x = 2; x < 258; x++) { sum += b.ao[y * 260 + x]; lo = std::min<int>(lo, b.ao[y * 260 + x]); }
-                std::printf("tuile %.1f %.1f côté %.1f : moyenne %.3f, minimum %.3f\n", b.cx, b.cz, b.side, sum / (256.0 * 256 * 255), lo / 255.0);
+                std::printf("tuile %.1f %.1f côté %.1f : moyenne %.3f, minimum %.3f", b.cx, b.cz, b.side, sum / (256.0 * 256 * 255), lo / 255.0);
+                if (!b.gi.empty()) {
+                    float up[3] = {0, 1, 0}, o[7];
+                    terrainBakeGi(bk, b.cx, b.cz, up, o);
+                    double m[18] = {};
+                    for (size_t y = 10; y < 250; y++) for (size_t x = 10; x < 250; x++) for (int k = 0; k < 18; k++) m[k] += b.gi[(y * 260 + x) * 18 + size_t(k)];
+                    std::printf(" ; GI moyennes ciel %.3f, renvoi %.3f %.3f %.3f, dir. ciel %.3f %.3f %.3f ; au centre vers le haut : ciel %.3f renvoi %.3f",
+                                m[6] / 57600, m[12] / 57600, m[13] / 57600, m[14] / 57600, m[9] / 57600, m[10] / 57600, m[11] / 57600, o[0], o[1]);
+                }
+                std::printf("\n");
             }
         } else if (cmd == "tarb") {   // fichier TARB -> données décompressées
             Bytes raw = readFile(u8path(argv[2]));
